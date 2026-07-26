@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyresolv"
+version = "2.0.0"
+description = "Обработка логов сетевого экрана набором стадий-фильтров (collect/trim/merge/aggregate/resolve)"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas==3.0.3",
+    "tqdm==4.67.3",
+    "requests",
+    "pydantic-settings",
+    "PyYAML",
+]
+
+[project.optional-dependencies]
+# Инструменты перевода (extract/update .po). Компиляция .mo не требует Babel —
+# она делается встроенным tools/msgfmt.py.
+i18n = ["babel"]
+
+[project.scripts]
+pyresolv = "pyresolv.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["pyresolv*"]
+
+[tool.setuptools.package-data]
+# Скомпилированные каталоги переводов должны уезжать вместе с пакетом.
+pyresolv = ["locale/*/LC_MESSAGES/*.mo"]

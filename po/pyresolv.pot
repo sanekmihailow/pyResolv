@@ -1,0 +1,227 @@
+# pyResolv translation template (source language: English).
+# Copy to po/<lang>.po and translate, then `make i18n-compile`.
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: pyresolv/cli.py
+msgid "Force output language (overrides LANG/LC_MESSAGES); by default taken from the environment, otherwise English"
+msgstr ""
+
+#: pyresolv/cli.py
+msgid "pyResolv — process firewall logs with a set of filter stages (collect/trim/merge/aggregate/resolve) composed via shell pipes."
+msgstr ""
+
+#: pyresolv/cli.py
+msgid "Which stage to run"
+msgstr ""
+
+#: pyresolv/cli.py
+msgid "Input; stdin by default. Ignored for collect (the source generates data itself). May be given multiple times for merge."
+msgstr ""
+
+#: pyresolv/cli.py
+msgid "Output; stdout by default."
+msgstr ""
+
+#: pyresolv/cli.py
+msgid "After output is written successfully, delete the -i input file(s), leaving only the result. Never touches stdin or the output file; not applied for collect (input is unused)."
+msgstr ""
+
+#: pyresolv/cli.py
+msgid "Data source (default: from config, otherwise 'graylog')"
+msgstr ""
+
+#: pyresolv/cli.py
+msgid "How many units back the overall range starts, default 1"
+msgstr ""
+
+#: pyresolv/cli.py
+msgid "How many units back the overall range ends, default 0"
+msgstr ""
+
+#: pyresolv/cli.py
+msgid "Time unit: d or h, default h"
+msgstr ""
+
+#: pyresolv/cli.py
+msgid "Chunked aggregation for very large files (hundreds of millions of rows)"
+msgstr ""
+
+#: pyresolv/cli.py
+msgid "Chunk size for --streaming, default %(size)s"
+msgstr ""
+
+#: pyresolv/cli.py
+msgid "Resolver (default: from config, otherwise 'gunter')"
+msgstr ""
+
+#: pyresolv/cli.py
+msgid "Key column for resolving, default %(col)s"
+msgstr ""
+
+#: pyresolv/cli.py
+msgid "Number of resolving threads (default: from the resolver config)"
+msgstr ""
+
+#: pyresolv/cli.py
+msgid "Configuration error (%(title)s):"
+msgstr ""
+
+#: pyresolv/cli.py
+msgid "Check .env (see .env.example)."
+msgstr ""
+
+#: pyresolv/cli.py
+msgid "Configuration error: %(err)s"
+msgstr ""
+
+#: pyresolv/cli.py
+msgid "Error: %(err)s"
+msgstr ""
+
+#: pyresolv/pipeline.py
+msgid "Warning: --delete is not applied for collect (input is unused)."
+msgstr ""
+
+#: pyresolv/pipeline.py
+msgid "Skipping deletion of %(path)s: it is the same as the output file."
+msgstr ""
+
+#: pyresolv/pipeline.py
+msgid "Deleted input file: %(path)s"
+msgstr ""
+
+#: pyresolv/pipeline.py
+msgid "Failed to delete %(path)s: %(err)s"
+msgstr ""
+
+#: pyresolv/config.py
+msgid "Source 'graylog' is not configured: set GRAYLOG__URL and GRAYLOG__STREAM_ID in .env (see .env.example)."
+msgstr ""
+
+#: pyresolv/config.py
+msgid "Resolver 'gunter' is not configured: set GUNTER__BASE_URL in .env (see .env.example)."
+msgstr ""
+
+#: pyresolv/stages/collect.py
+msgid "Base time for window calculation: %(ts)s"
+msgstr ""
+
+#: pyresolv/stages/collect.py
+msgid "Total: %(n)d window"
+msgid_plural "Total: %(n)d windows"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+
+#: pyresolv/stages/collect.py
+msgid "Wrote %(n)d row"
+msgid_plural "Wrote %(n)d rows"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+
+#: pyresolv/stages/trim.py
+msgid "Trimming %(path)s"
+msgstr ""
+
+#: pyresolv/stages/trim.py
+msgid "Trimming"
+msgstr ""
+
+#: pyresolv/stages/merge.py
+msgid "Could not find any non-empty CSV input for merge"
+msgstr ""
+
+#: pyresolv/stages/aggregate.py
+msgid "CSV has no columns to GROUP BY"
+msgstr ""
+
+#: pyresolv/stages/aggregate.py
+msgid "Input CSV is empty"
+msgstr ""
+
+#: pyresolv/stages/aggregate.py
+msgid "Aggregated %(n)s row"
+msgid_plural "Aggregated %(n)s rows"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+
+#: pyresolv/sources/base.py
+msgid "<no sources registered>"
+msgstr ""
+
+#: pyresolv/sources/base.py
+msgid "Unknown source '%(name)s'. Available sources: %(available)s"
+msgstr ""
+
+#: pyresolv/sources/base.py
+msgid "Unsupported unit: %(unit)s"
+msgstr ""
+
+#: pyresolv/sources/base.py
+msgid "--start must be greater than --end, e.g. --start 5 --end 0"
+msgstr ""
+
+#: pyresolv/sources/graylog.py
+msgid "[%(w)s] Batch %(b)d: received %(n)d documents"
+msgstr ""
+
+#: pyresolv/sources/graylog.py
+msgid "[%(w)s] Batch %(b)d: wrote %(n)d rows"
+msgstr ""
+
+#: pyresolv/sources/graylog.py
+msgid "Done for window %(w)s: %(b)d batches, %(n)d rows"
+msgstr ""
+
+#: pyresolv/resolvers/base.py
+msgid "<no resolvers registered>"
+msgstr ""
+
+#: pyresolv/resolvers/base.py
+msgid "Unknown resolver '%(name)s'. Available resolvers: %(available)s"
+msgstr ""
+
+#: pyresolv/resolvers/base.py
+msgid "max_workers must be >= 1"
+msgstr ""
+
+#: pyresolv/resolvers/base.py
+msgid "CSV has no column '%(col)s'"
+msgstr ""
+
+#: pyresolv/resolvers/base.py
+msgid "Total rows in CSV: %(n)s"
+msgstr ""
+
+#: pyresolv/resolvers/base.py
+msgid "Unique '%(col)s' values to resolve: %(n)s"
+msgstr ""
+
+#: pyresolv/resolvers/base.py
+msgid "Threads: %(n)d"
+msgstr ""
+
+#: pyresolv/resolvers/base.py
+msgid "Nothing to enrich, the file is already filled or empty."
+msgstr ""
+
+#: pyresolv/resolvers/base.py
+msgid "Resolving via %(name)s"
+msgstr ""
+
+#: pyresolv/resolvers/base.py
+msgid "[%(name)s][%(key)s] unexpected error: %(err)s"
+msgstr ""
+
+#: pyresolv/resolvers/gunter.py
+msgid "[GUNTER][%(key)s] geo-lookup error: %(err)s"
+msgstr ""
+
+#: pyresolv/resolvers/gunter.py
+msgid "[GUNTER][%(key)s] whois error: %(err)s"
+msgstr ""

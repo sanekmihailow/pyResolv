@@ -1,0 +1,128 @@
+"""Dispatcher `--type` -> stage. Each run_* function takes the parsed
+argparse.Namespace and runs the corresponding stage from pyresolv.stages.
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+from pyresolv.config import get_settings
+from pyresolv.i18n import _
+from pyresolv.resolvers.base import get_resolver
+from pyresolv.schema import DEFAULT_RESOLVE_WORKERS
+from pyresolv.sources.base import get_source
+from pyresolv.stages.aggregate import aggregate
+from pyresolv.stages.collect import collect
+from pyresolv.stages.merge import merge
+from pyresolv.stages.trim import trim
+
+
+def _resolve_default_workers(resolver_name: str) -> int:
+    """Default number of resolving threads: taken from the integration config
+    if configured (e.g. GUNTER__MAX_WORKERS), otherwise the shared default."""
+    settings = get_settings()
+    if resolver_name == "gunter" and settings.gunter is not None:
+        return settings.gunter.max_workers
+    return DEFAULT_RESOLVE_WORKERS
+
+
+def run_collect(args: argparse.Namespace) -> int:
+    source_name = args.source or get_settings().default_source
+    source = get_source(source_name)
+    return collect(
+        source=source,
+        output_path=args.output,
+        start=args.start,
+        end=args.end,
+        time_unit=args.time_unit,
+    )
+
+
+def run_trim(args: argparse.Namespace) -> int:
+    return trim(
+        input_path=args.input[0] if args.input else None,
+        output_path=args.output,
+    )
+
+
+def run_merge(args: argparse.Namespace) -> int:
+    return merge(
+        input_paths=list(args.input) if args.input else [],
+        output_path=args.output,
+    )
+
+
+def run_aggregate(args: argparse.Namespace) -> int:
+    min_count = args.min_count if args.min_count is not None else get_settings().min_uniq_count
+    return aggregate(
+        input_path=args.input[0] if args.input else None,
+        output_path=args.output,
+        streaming=args.streaming,
+        chunk_size=args.chunk_size,
+        min_count=min_count,
+    )
+
+
+def run_resolve(args: argparse.Namespace) -> int:
+    resolver_name = args.resolver or get_settings().default_resolver
+    resolver = get_resolver(resolver_name)
+    max_workers = args.workers if args.workers is not None else _resolve_default_workers(resolver_name)
+    return resolver.resolve(
+        input_path=args.input[0] if args.input else None,
+        output_path=args.output,
+        key_column=args.key_column,
+        max_workers=max_workers,
+    )
+
+
+DISPATCH = {
+    "collect": run_collect,
+    "trim": run_trim,
+    "merge": run_merge,
+    "aggregate": run_aggregate,
+    "resolve": run_resolve,
+}
+
+
+def _delete_inputs(args: argparse.Namespace) -> None:
+    """Delete the -i input files after the stage completes successfully (--delete).
+
+    Safety: only real files passed via -i are deleted. We never touch stdin
+    ('-'/no path) or the -o output file. collect ignores its input, so there is
+    nothing to delete.
+    """
+    if not getattr(args, "delete", False):
+        return
+
+    if args.type == "collect":
+        print(_("Warning: --delete is not applied for collect (input is unused)."), file=sys.stderr)
+        return
+
+    inputs = args.input or []
+    out = args.output
+    out_resolved = Path(out).resolve() if out and out != "-" else None
+
+    for path in inputs:
+        if path is None or path == "-":
+            continue
+        p = Path(path)
+        if not p.is_file():
+            continue
+        if out_resolved is not None and p.resolve() == out_resolved:
+            print(_("Skipping deletion of %(path)s: it is the same as the output file.") % {"path": p}, file=sys.stderr)
+            continue
+        try:
+            p.unlink()
+            print(_("Deleted input file: %(path)s") % {"path": p}, file=sys.stderr)
+        except OSError as e:
+            print(_("Failed to delete %(path)s: %(err)s") % {"path": p, "err": e}, file=sys.stderr)
+
+
+def dispatch(args: argparse.Namespace) -> int:
+    handler = DISPATCH[args.type]
+    result = handler(args)
+    # Delete inputs only after the stage returns successfully — if the handler
+    # raises, the exception propagates and the input data is left untouched.
+    _delete_inputs(args)
+    return result

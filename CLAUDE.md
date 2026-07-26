@@ -1,0 +1,169 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Overview
+
+CLI tooling for processing firewall/network-connection logs. The project name is PyResolv. It is a single
+package, `pyresolv/`, built as a set of composable filter-stages (`collect`, `trim`, `merge`, `aggregate`,
+`resolve`) that compose via shell pipes — Unix-filter style: one stage = one process, reads stdin/`-i`, writes
+stdout/`-o`. Sources (e.g. `graylog`/OpenSearch) and resolvers (e.g. `gunter`) are name-registered plugins.
+
+There is no git repository (as of this writing), no lint config. Comments and docstrings are in English. All
+user-facing strings (CLI help, errors, stderr status) are English `msgid`s in the code, translated to Russian
+via gettext (`po/ru.po`); see the Localization section — match that when editing user-facing strings.
+
+This replaced an earlier version of the project (two duplicated monoliths: `get_dst_ip_ranges.py` +
+`resolver.py` + `api/gunter/resolve.py`, driven by boolean flags). See `.md/PLAN.md` for the refactor spec that
+produced the current structure.
+
+## Environment & running
+
+Python 3.10+. Dependencies in `requirements.txt` (`pandas==3.0.3`, `tqdm==4.67.3`, `requests`,
+`pydantic-settings`). Install editable to get the `pyresolv` console script:
+
+```bash
+python3 -m venv .venv
+./.venv/bin/pip install -r requirements.txt
+./.venv/bin/pip install -e .
+
+cp .env.example .env   # fill in GRAYLOG__*/GUNTER__* as needed
+
+./.venv/bin/pyresolv --type trim -i input.csv -o trimmed.csv
+./.venv/bin/pyresolv --type collect --source graylog --start 5 --end 0 --time-unit h \
+  | ./.venv/bin/pyresolv --type trim \
+  | ./.venv/bin/pyresolv --type aggregate \
+  | ./.venv/bin/pyresolv --type resolve --resolver gunter -o out.csv
+```
+
+`pyresolv` is a real package (`__init__.py` everywhere, no namespace-package tricks), installable via
+`pyproject.toml` (`pip install -e .`), console-script entry point `pyresolv -> pyresolv.cli:main`. `cli.py`
+follows the conventional `if __name__ == "__main__": main()` idiom (no `__main__.py`).
+
+Tests: `./.venv/bin/python -m pytest tests/`.
+
+## Architecture
+
+```
+pyresolv/
+  config.py          pydantic-settings: nested per-integration settings loaded from .env
+  schema.py           CANONICAL_COLUMNS / DROP_COLS / GROUP_COLS / sort order / pandas read kwargs — single source
+  io.py                open_input/open_output: path -> file, None/'-' -> stdin/stdout
+  pipeline.py         --type -> stage dispatcher (Variant A: one stage per process)
+  runner.py           single-process pipeline engine + YAML config (Variant B)
+  cli.py               argparse; exports main(); routes the `run` subcommand to runner.py
+  sources/
+    base.py            Source ABC + SOURCES registry + register_source; time-window helpers
+    graylog.py          OpenSearch _search + search_after pagination (ported 1:1)
+  stages/
+    collect.py, trim.py, merge.py, aggregate.py
+  resolvers/
+    base.py             Resolver ABC + RESOLVERS registry; ThreadPool, cache, idempotent skip
+    gunter.py            geo-lookup + whois HTTP calls
+```
+
+**CSV wire format between stages**: fixed-header CSV. All pandas reads across the package share
+`schema.PANDAS_READ_KWARGS` (`keep_default_na=False, dtype=str, low_memory=False`) so that (a) empty fields
+stay empty strings rather than becoming NaN, (b) literal values like `"NA"`/`"NULL"` in real data are never
+silently swallowed as missing, and (c) `aggregate --streaming` is guaranteed to produce byte-identical output
+to the non-streaming full-load mode regardless of chunk boundaries (dtype can't drift chunk-to-chunk).
+
+**Stage stdout is data-only**: every stage prints its status/progress messages to stderr (`print(..., file=sys.stderr)`,
+tqdm already defaults to stderr) — stdout is reserved for the CSV wire format so stages can be piped together.
+
+**Two ways to run a pipeline** (both use the same stages, produce the same result):
+- **Variant A** (`pipeline.py`): `pyresolv --type X | pyresolv --type Y` — one stage per OS process, glued by
+  shell pipes, CSV on the wire. Streaming/chunked, bounded memory; the default and the flexible option.
+- **Variant B** (`runner.py`): `pyresolv run --config pipeline.yaml` — the whole pipeline in ONE process, a live
+  `DataFrame` flowing between steps (no CSV re-serialization). Faster, single log/config, but holds the dataset
+  in memory. Each stage exposes an in-memory `*_frame` core (`trim_frame`, `aggregate_frame`, `collect_frame`,
+  `merge_frames`, `Resolver.enrich`) that the engine chains; the path-based Variant A functions are thin
+  read→core→write wrappers around the same logic, so both stay byte-identical. YAML steps are validated with
+  per-step pydantic models (`extra="forbid"`), so a typo'd param fails fast before anything runs. `cli.main()`
+  routes `argv[0] == "run"` to `runner.run_pipeline`; everything else is the classic `--type` parser, unchanged.
+  Needs `PyYAML`.
+
+**`--delete`/`--del`**: handled centrally in `pipeline.dispatch` (via `_delete_inputs`), NOT inside individual
+stages — after the stage handler returns successfully, it removes the stage's `-i` input file(s), so a chain
+like `trim --del -i connections.csv -o trimmed.csv` then `aggregate --del -i trimmed.csv -o aggregated.csv`
+leaves only the final result on disk. Safety guarantees: deletion runs only after the handler returns without
+raising (a failed stage keeps its input); never deletes stdin (`-`/no path) or a path equal to `-o`
+(`-i == -o` is skipped); for `collect` it is a no-op (input is ignored). Every deletion is logged to stderr.
+
+**Stages** (`pyresolv/stages/`):
+1. **collect** — `sources/graylog.py` pages OpenSearch via `search_after` (page size from
+   `GRAYLOG__SEARCH_SIZE`), filters to IPv4 with non-private `DstIP`, applies optional `SrcIP` allowlist
+   (`GRAYLOG__SRC_IP_LIST`, a `terms` query) and/or regex (`GRAYLOG__SRC_IP_REGEX`, a **list** of patterns
+   OR-combined via `bool.should` + `minimum_should_match=1`) filters at the OpenSearch query level.
+   `--source` picks the source by name (`sources.SOURCES` registry); default comes from
+   `settings.default_source`, then falls back to `"graylog"`.
+2. **trim** — drops `schema.DROP_COLS`, chunked read/write (`schema.DEFAULT_TRIM_CHUNKSIZE`, 10k rows). The
+   tqdm progress bar tracks actual bytes consumed from the input file handle (`f.tell()`), not the pandas
+   in-memory chunk size — the original script's progress bar was tracking two different units (`total` in file
+   bytes, `update()` in `chunk.memory_usage(deep=True)`), which never lined up.
+3. **merge** — concatenates whatever CSV inputs are passed via repeated `-i`, taking the header from the first
+   non-empty one. (Simplified vs. the old `merge_files_by_creation_time`, which scanned a directory for
+   `connections_*.csv` and sorted by file ctime — that directory-scanning responsibility now belongs to the
+   caller/shell, not the stage.)
+4. **aggregate** — `groupby(GROUP_COLS).size()`, sorted by `count` desc then `ac_action`/`SrcIP`/`DstIP`/`DstPort`
+   asc (`schema.SORT_CANDIDATES`, intersected with columns actually present). **Default mode: `--streaming`**
+   (`argparse.BooleanOptionalAction`, default `True`) — full load easily exhausts RAM on tens-of-millions-of-rows
+   inputs (every cell is a `dtype=str` Python object), so streaming is the safe default. `--streaming`
+   (+`--chunk-size`, default 500_000): reads in chunks, computes a partial `groupby().size()` per chunk, then
+   sums partial counts by key — mathematically equivalent to the full-load `.size()`, and made byte-identical to
+   it by sharing `PANDAS_READ_KWARGS` (see above); shows a tqdm byte-progress bar over the input file (`f.tell()`),
+   like `trim`. `--no-streaming` forces the old full in-memory load (faster for small files). Both modes produce
+   byte-identical output. **`--min-count`** (default from `MIN_UNIQ_COUNT` in `.env`, else `1` = keep all) drops
+   aggregated groups whose `count` is below the threshold — applied *after* the full aggregation (in streaming the
+   group's final count is only known once all chunks are summed), identically in both modes, so the byte-identical
+   guarantee holds. This is the one config value `aggregate` reads (a plain top-level `Settings` field, needs no
+   integration configured).
+5. **resolve** — `resolvers/base.py` has the generic mechanics (ThreadPoolExecutor, `--workers`, per-key cache,
+   `_is_already_enriched` idempotent skip — a row is skipped if `country`/`asn`/`asn_descr`/`contacts` are all
+   already non-empty); `resolvers/gunter.py` implements only `resolve_one(ip)` (geo-lookup + whois + contact
+   extraction). `--resolver` picks by name (`resolvers.RESOLVERS` registry); default from
+   `settings.default_resolver`, then `"gunter"`.
+
+## Configuration (`pyresolv/config.py`, `.env`)
+
+All previously-hardcoded operational constants (`OPENSEARCH_URL`, `INDEX`, `STREAM_ID`, `SRC_IP_LIST`,
+`SRC_IP_REGEX`, `GUNTER_BASE_URL`, timeouts, worker counts) now live in `.env` (see `.env.example`), loaded via
+`pydantic-settings`. Nested settings use the `__` delimiter: `GRAYLOG__URL`, `GRAYLOG__STREAM_ID`,
+`GUNTER__BASE_URL`, etc.
+
+`Settings.graylog`/`Settings.gunter` are `Optional` — stages that don't need an integration (`trim`, `merge`,
+`aggregate`) never require one. (`aggregate` does read the top-level `min_uniq_count` field for `--min-count`'s
+default, but that is a plain scalar with a default — it constructs fine with no integration configured.) Stages
+that do (`collect` -> graylog, `resolve` -> gunter) fetch their
+section via `settings.require_graylog()`/`require_gunter()`, which raises a clear `ConfigError` (caught in
+`cli.py`, printed to stderr, exit code 2) if the section is entirely absent. If a section is *partially* filled
+in (e.g. `GRAYLOG__URL` set but `GRAYLOG__STREAM_ID` missing), `pydantic_settings.BaseSettings` itself raises a
+`ValidationError` at `Settings()` construction time — i.e. at the very start of the run, not mid-stream.
+
+Two historical bugs fixed during the migration:
+- `SRC_IP_REGEX` had a stray backslash: `r"10\.8\.\139\.\d+"` — the `\1` was an unintended backreference.
+  `GRAYLOG__SRC_IP_REGEX` is now a JSON list of patterns (like `SRC_IP_LIST`); backslashes are doubled inside
+  JSON, so `.env.example` has `GRAYLOG__SRC_IP_REGEX=["10\\.8\\.139\\.\\d+"]` (parses to `10\.8\.139\.\d+`).
+- `trim`'s tqdm progress bar mismatched units (see stage description above).
+
+## Localization (`pyresolv/i18n.py`, `po/`, `pyresolv/locale/`)
+
+All user-facing strings (help, errors, stderr status) go through gettext. **Source language is English**
+— the string in code IS the `msgid`; Russian lives in `po/ru.po`, compiled to
+`pyresolv/locale/ru/LC_MESSAGES/pyresolv.mo`. (Pydantic `Field(description=...)` texts in `config.py` are plain
+English developer schema docs — they are never printed to users and don't go through gettext.)
+
+- **Usage in code:** `from pyresolv.i18n import _, ngettext`. `_` / `ngettext` are functions that read the
+  current translation from a module global, so calling `i18n.setup(lang)` once at the top of `main()` is enough
+  — everything built afterwards (including argparse `help=`) picks up the language. Named `%(x)s` placeholders
+  (not positional `{}`), so translations can reorder. Counts use `ngettext` (Russian has 3 plural forms;
+  `Plural-Forms` header in `ru.po`).
+- **Language selection** (`i18n.setup`): `--lang {ru,en}` → environment (`LANGUAGE`/`LC_ALL`/`LC_MESSAGES`/`LANG`,
+  read by gettext when `languages=None`) → English via `fallback=True` (returns the msgid). `cli.py` pre-parses
+  `--lang` with a throwaway `add_help=False` parser **before** building the real parser (chicken-and-egg: help
+  strings must already be in the chosen language). Note: argparse's *own* built-in strings (`usage:`, etc.)
+  stay English — only our strings are translated.
+- **Tooling:** compiling `.po → .mo` uses the bundled pure-Python `tools/msgfmt.py` (no GNU gettext / Babel
+  needed) — this is why `.mo` compiles anywhere; `init.sh` runs it on setup and the `.mo` is committed.
+  Extraction/update (`make i18n-extract` / `i18n-update`) need Babel (`pip install -e '.[i18n]'`); compile is
+  `make i18n-compile`. Adding a language = new `po/<lang>.po` + add to `LANGS` in the `Makefile`.

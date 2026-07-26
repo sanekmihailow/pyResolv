@@ -1,0 +1,330 @@
+# Русский перевод pyResolv.
+# msgid — английский (исходный язык), msgstr — русский.
+msgid ""
+msgstr ""
+"Project-Id-Version: pyresolv 2.0.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: ru\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+#: pyresolv/cli.py
+msgid "Force output language (overrides LANG/LC_MESSAGES); by default taken from the environment, otherwise English"
+msgstr "Принудительно задать язык вывода (перекрывает LANG/LC_MESSAGES); по умолчанию берётся из окружения, иначе английский"
+
+#: pyresolv/cli.py
+msgid "pyResolv — process firewall logs with a set of filter stages (collect/trim/merge/aggregate/resolve) composed via shell pipes."
+msgstr "pyResolv — обработка логов сетевого экрана набором стадий-фильтров (collect/trim/merge/aggregate/resolve), соединяемых шелл-пайпами."
+
+#: pyresolv/cli.py
+msgid "Which stage to run"
+msgstr "Какую стадию запустить"
+
+#: pyresolv/cli.py
+msgid "Input; stdin by default. Ignored for collect (the source generates data itself). May be given multiple times for merge."
+msgstr "Вход; по умолчанию stdin. Для collect игнорируется (источник генерирует данные сам). Для merge допускается указывать несколько раз."
+
+#: pyresolv/cli.py
+msgid "Output; stdout by default."
+msgstr "Выход; по умолчанию stdout."
+
+#: pyresolv/cli.py
+msgid "After output is written successfully, delete the -i input file(s), leaving only the result. Never touches stdin or the output file; not applied for collect (input is unused)."
+msgstr "После успешной записи выхода удалить входной(-ые) файл(ы) -i, оставив только результат. Не трогает stdin и выходной файл; для collect не применяется (вход не используется)."
+
+#: pyresolv/cli.py
+msgid "Data source (default: from config, otherwise 'graylog')"
+msgstr "Источник данных (по умолчанию — из конфига, иначе 'graylog')"
+
+#: pyresolv/cli.py
+msgid "How many units back the overall range starts, default 1"
+msgstr "Сколько единиц назад начинается общий диапазон, по умолчанию 1"
+
+#: pyresolv/cli.py
+msgid "How many units back the overall range ends, default 0"
+msgstr "Сколько единиц назад заканчивается общий диапазон, по умолчанию 0"
+
+#: pyresolv/cli.py
+msgid "Time unit: d or h, default h"
+msgstr "Единица времени: d или h, по умолчанию h"
+
+#: pyresolv/cli.py
+msgid ""
+"Chunked aggregation (default): bounded memory, safe for very large files. "
+"Use --no-streaming to force the full in-memory load (faster for small files, "
+"but can exhaust RAM on huge ones)."
+msgstr ""
+"Чанковая агрегация (по умолчанию): ограниченная память, безопасно для очень "
+"больших файлов. Используйте --no-streaming для полной загрузки в память "
+"(быстрее на маленьких файлах, но может исчерпать RAM на больших)."
+
+#: pyresolv/cli.py
+msgid "Chunk size for --streaming, default %(size)s"
+msgstr "Размер чанка для --streaming, по умолчанию %(size)s"
+
+#: pyresolv/cli.py
+msgid ""
+"Drop aggregated groups whose count is below this threshold (default: from "
+"config MIN_UNIQ_COUNT, otherwise 1 = keep all)."
+msgstr ""
+"Выбрасывать агрегированные группы, у которых count ниже порога (по "
+"умолчанию: из конфига MIN_UNIQ_COUNT, иначе 1 = оставить всё)."
+
+#: pyresolv/stages/aggregate.py
+msgid "Dropped %(n)s group with count < %(min)s"
+msgid_plural "Dropped %(n)s groups with count < %(min)s"
+msgstr[0] "Отброшена %(n)s группа с count < %(min)s"
+msgstr[1] "Отброшено %(n)s группы с count < %(min)s"
+msgstr[2] "Отброшено %(n)s групп с count < %(min)s"
+
+#: pyresolv/cli.py
+msgid "Resolver (default: from config, otherwise 'gunter')"
+msgstr "Резолвер (по умолчанию — из конфига, иначе 'gunter')"
+
+#: pyresolv/cli.py
+msgid "Key column for resolving, default %(col)s"
+msgstr "Колонка-ключ для резолвинга, по умолчанию %(col)s"
+
+#: pyresolv/cli.py
+msgid "Number of resolving threads (default: from the resolver config)"
+msgstr "Число потоков резолвинга (по умолчанию — из конфига резолвера)"
+
+#: pyresolv/cli.py
+msgid "Configuration error (%(title)s):"
+msgstr "Ошибка конфигурации (%(title)s):"
+
+#: pyresolv/cli.py
+msgid "Check .env (see .env.example)."
+msgstr "Проверьте .env (см. .env.example)."
+
+#: pyresolv/cli.py
+msgid "Configuration error: %(err)s"
+msgstr "Ошибка конфигурации: %(err)s"
+
+#: pyresolv/cli.py
+msgid "Error: %(err)s"
+msgstr "Ошибка: %(err)s"
+
+#: pyresolv/pipeline.py
+msgid "Warning: --delete is not applied for collect (input is unused)."
+msgstr "Предупреждение: --delete не применяется к collect (вход не используется)."
+
+#: pyresolv/pipeline.py
+msgid "Skipping deletion of %(path)s: it is the same as the output file."
+msgstr "Пропуск удаления %(path)s: совпадает с выходным файлом."
+
+#: pyresolv/pipeline.py
+msgid "Deleted input file: %(path)s"
+msgstr "Удалён входной файл: %(path)s"
+
+#: pyresolv/pipeline.py
+msgid "Failed to delete %(path)s: %(err)s"
+msgstr "Не удалось удалить %(path)s: %(err)s"
+
+#: pyresolv/config.py
+msgid "Source 'graylog' is not configured: set GRAYLOG__URL and GRAYLOG__STREAM_ID in .env (see .env.example)."
+msgstr "Источник 'graylog' не настроен: заполните GRAYLOG__URL и GRAYLOG__STREAM_ID в .env (см. .env.example)."
+
+#: pyresolv/config.py
+msgid "Resolver 'gunter' is not configured: set GUNTER__BASE_URL in .env (see .env.example)."
+msgstr "Резолвер 'gunter' не настроен: заполните GUNTER__BASE_URL в .env (см. .env.example)."
+
+#: pyresolv/stages/collect.py
+msgid "Base time for window calculation: %(ts)s"
+msgstr "Базовое время расчета окон: %(ts)s"
+
+#: pyresolv/stages/collect.py
+msgid "Total: %(n)d window"
+msgid_plural "Total: %(n)d windows"
+msgstr[0] "Всего: %(n)d окно"
+msgstr[1] "Всего: %(n)d окна"
+msgstr[2] "Всего: %(n)d окон"
+
+#: pyresolv/stages/collect.py
+msgid "Wrote %(n)d row"
+msgid_plural "Wrote %(n)d rows"
+msgstr[0] "Записано %(n)d строка"
+msgstr[1] "Записано %(n)d строки"
+msgstr[2] "Записано %(n)d строк"
+
+#: pyresolv/stages/trim.py
+msgid "Trimming %(path)s"
+msgstr "Обрезка %(path)s"
+
+#: pyresolv/stages/trim.py
+msgid "Trimming"
+msgstr "Обрезка"
+
+#: pyresolv/stages/merge.py
+msgid "Could not find any non-empty CSV input for merge"
+msgstr "Не удалось найти ни одного непустого CSV-входа для merge"
+
+#: pyresolv/stages/aggregate.py
+msgid "Aggregating %(path)s"
+msgstr "Агрегация %(path)s"
+
+#: pyresolv/stages/aggregate.py
+msgid "Aggregating"
+msgstr "Агрегация"
+
+#: pyresolv/stages/aggregate.py
+msgid "CSV has no columns to GROUP BY"
+msgstr "В CSV нет ни одной колонки для GROUP BY"
+
+#: pyresolv/stages/aggregate.py
+msgid "Input CSV is empty"
+msgstr "Входной CSV пуст"
+
+#: pyresolv/stages/aggregate.py
+msgid "Aggregated %(n)s row"
+msgid_plural "Aggregated %(n)s rows"
+msgstr[0] "Агрегировано %(n)s строка"
+msgstr[1] "Агрегировано %(n)s строки"
+msgstr[2] "Агрегировано %(n)s строк"
+
+#: pyresolv/sources/base.py
+msgid "<no sources registered>"
+msgstr "<нет зарегистрированных источников>"
+
+#: pyresolv/sources/base.py
+msgid "Unknown source '%(name)s'. Available sources: %(available)s"
+msgstr "Неизвестный источник '%(name)s'. Доступные источники: %(available)s"
+
+#: pyresolv/sources/base.py
+msgid "Unsupported unit: %(unit)s"
+msgstr "Неподдерживаемая единица: %(unit)s"
+
+#: pyresolv/sources/base.py
+msgid "--start must be greater than --end, e.g. --start 5 --end 0"
+msgstr "--start должен быть больше --end, например --start 5 --end 0"
+
+#: pyresolv/sources/graylog.py
+msgid "[%(w)s] Batch %(b)d: received %(n)d documents"
+msgstr "[%(w)s] Батч %(b)d: получено %(n)d документов"
+
+#: pyresolv/sources/graylog.py
+msgid "[%(w)s] Batch %(b)d: wrote %(n)d rows"
+msgstr "[%(w)s] Батч %(b)d: записано %(n)d строк"
+
+#: pyresolv/sources/graylog.py
+msgid "Done for window %(w)s: %(b)d batches, %(n)d rows"
+msgstr "Готово для окна %(w)s: батчей %(b)d, строк %(n)d"
+
+#: pyresolv/resolvers/base.py
+msgid "<no resolvers registered>"
+msgstr "<нет зарегистрированных резолверов>"
+
+#: pyresolv/resolvers/base.py
+msgid "Unknown resolver '%(name)s'. Available resolvers: %(available)s"
+msgstr "Неизвестный резолвер '%(name)s'. Доступные резолверы: %(available)s"
+
+#: pyresolv/resolvers/base.py
+msgid "max_workers must be >= 1"
+msgstr "max_workers должен быть >= 1"
+
+#: pyresolv/resolvers/base.py
+msgid "CSV has no column '%(col)s'"
+msgstr "В CSV нет колонки '%(col)s'"
+
+#: pyresolv/resolvers/base.py
+msgid "Total rows: %(n)s"
+msgstr "Всего строк: %(n)s"
+
+#: pyresolv/resolvers/base.py
+msgid "Unique '%(col)s' values to resolve: %(n)s"
+msgstr "Уникальных значений '%(col)s' для резолвинга: %(n)s"
+
+#: pyresolv/resolvers/base.py
+msgid "Threads: %(n)d"
+msgstr "Потоков: %(n)d"
+
+#: pyresolv/resolvers/base.py
+msgid "Nothing to enrich, the file is already filled or empty."
+msgstr "Нет значений для enrichment, файл уже заполнен или пуст."
+
+#: pyresolv/resolvers/base.py
+msgid "Resolving via %(name)s"
+msgstr "Резолвинг через %(name)s"
+
+#: pyresolv/resolvers/base.py
+msgid "[%(name)s][%(key)s] unexpected error: %(err)s"
+msgstr "[%(name)s][%(key)s] неожиданная ошибка: %(err)s"
+
+#: pyresolv/resolvers/gunter.py
+msgid "[GUNTER][%(key)s] geo-lookup error: %(err)s"
+msgstr "[GUNTER][%(key)s] ошибка geo-lookup: %(err)s"
+
+#: pyresolv/resolvers/gunter.py
+msgid "[GUNTER][%(key)s] whois error: %(err)s"
+msgstr "[GUNTER][%(key)s] ошибка whois: %(err)s"
+
+#: pyresolv/cli.py
+msgid ""
+"Run a whole pipeline in one process from a YAML config, with a live DataFrame "
+"flowing between steps (no CSV re-serialization)."
+msgstr ""
+"Запустить весь пайплайн в одном процессе по YAML-конфигу; между шагами течёт "
+"живой DataFrame (без пересериализации в CSV)."
+
+#: pyresolv/cli.py
+msgid "YAML pipeline config: a list of steps (see README)."
+msgstr "YAML-конфиг пайплайна: список шагов (см. README)."
+
+#: pyresolv/cli.py
+msgid ""
+"Initial input for the first step (stdin by default). Ignored when the first "
+"step is collect (it produces data itself)."
+msgstr ""
+"Начальный вход для первого шага (по умолчанию stdin). Игнорируется, если "
+"первый шаг — collect (он генерирует данные сам)."
+
+#: pyresolv/cli.py
+msgid "Final output; stdout by default."
+msgstr "Финальный выход; по умолчанию stdout."
+
+#: pyresolv/runner.py
+msgid "PyYAML is required for 'pyresolv run'. Install it: pip install pyyaml"
+msgstr "Для 'pyresolv run' нужен PyYAML. Установите: pip install pyyaml"
+
+#: pyresolv/runner.py
+msgid "Pipeline config must be a YAML list of steps."
+msgstr "Конфиг пайплайна должен быть YAML-списком шагов."
+
+#: pyresolv/runner.py
+msgid "Params for step '%(step)s' must be a mapping."
+msgstr "Параметры шага '%(step)s' должны быть отображением (mapping)."
+
+#: pyresolv/runner.py
+msgid ""
+"Each step must be a stage name or a single-key mapping 'name: {params}', got: "
+"%(item)r"
+msgstr ""
+"Каждый шаг — это имя стадии или отображение с одним ключом 'name: {params}', "
+"получено: %(item)r"
+
+#: pyresolv/runner.py
+msgid "Unknown pipeline step '%(step)s'. Available steps: %(available)s"
+msgstr "Неизвестный шаг пайплайна '%(step)s'. Доступные шаги: %(available)s"
+
+#: pyresolv/runner.py
+msgid "Pipeline config is empty."
+msgstr "Конфиг пайплайна пуст."
+
+#: pyresolv/runner.py
+msgid ""
+"Step '%(step)s' has no input: it is not the first step, and no -i input was "
+"given."
+msgstr ""
+"У шага '%(step)s' нет входа: он не первый, и вход -i не задан."
+
+#: pyresolv/runner.py
+msgid "Invalid params for step '%(step)s': %(err)s"
+msgstr "Некорректные параметры шага '%(step)s': %(err)s"
+
+#: pyresolv/runner.py
+msgid "Pipeline finished: %(n)s rows"
+msgstr "Пайплайн завершён: %(n)s строк"
+
+#: pyresolv/runner.py
+msgid "Pipeline produced no data."
+msgstr "Пайплайн не произвёл данных."
