@@ -29,11 +29,19 @@ collect  ->  trim  ->  merge  ->  aggregate  ->  resolve
   для очень больших файлов; `--no-streaming` включает полный pandas full-load
   (быстрее на маленьких файлах). Оба режима дают побайтово идентичный
   результат. `--min-count` (или env `MIN_UNIQ_COUNT`, по умолчанию `1` =
-  оставить всё) выбрасывает группы с `count` ниже порога.
+  оставить всё) выбрасывает группы с `count` ниже порога. `--out-dir DIR`
+  (вместо `-o`) раскладывает результат по одному CSV на подсеть из
+  `GRAYLOG__SRC_IP_CIDR` (строки вне подсетей → файл `other`); в имени файла —
+  временной срез, напр.
+  `aggregation_10.2.83.0-24__2026-07-23__2026-07-28__time-12-10.csv`.
 - **resolve** — обогащает строки по ключевой колонке (`--key-column`, по
-  умолчанию `DstIP`) через резолвер (`--resolver`, по умолчанию `gunter`):
-  добавляет `country`, `asn`, `asn_descr`, `contacts`. Идемпотентно: уже
-  заполненные строки не резолвятся повторно и не дёргают сеть.
+  умолчанию `DstIP`) через резолвер (`--resolver`), добавляя `country`, `asn`,
+  `asn_descr`, `contacts`. Резолверы: **`default`** (по умолчанию —
+  самодостаточная цепочка GEO → RDAP → WHOIS), `rdap` / `whois` (один
+  провайдер, через `ipwhois`), `geo_maxmind` (страна из локального MaxMind
+  `.mmdb` — задать `RESOLVE__MMDB_PATH` и `pip install -e '.[geo]'`) и `gunter`
+  (внешний HTTP-сервис). Идемпотентно: уже заполненные строки не резолвятся
+  повторно и не дёргают сеть.
 
 Источники и резолверы — плагины, регистрируемые по имени
 (`pyresolv/sources/`, `pyresolv/resolvers/`); чтобы добавить новый источник
@@ -51,6 +59,7 @@ pyResolv/
 │   ├── config.py                typed configuration (pydantic-settings) from .env
 │   ├── schema.py                single source of the CSV schema: columns, sort order, read kwargs
 │   ├── io.py                    open_input/open_output: path -> file, None/'-' -> stdin/stdout
+│   ├── subnets.py               ipaddress helpers: CIDR parsing, octet prefix, labels, split filenames
 │   ├── i18n.py                  localization via gettext (_/ngettext, setup)
 │   ├── stages/                  filter stages
 │   │   ├── collect.py           pulls records from a source by time windows
@@ -62,7 +71,12 @@ pyResolv/
 │   │   └── graylog.py           OpenSearch _search + search_after pagination
 │   ├── resolvers/               resolver plugins for `resolve`
 │   │   ├── base.py              Resolver ABC + RESOLVERS registry + ThreadPool/cache/idempotency
-│   │   └── gunter.py            geo-lookup + whois HTTP calls
+│   │   ├── default_chain.py     `default` resolver: chain GEO -> RDAP -> WHOIS
+│   │   ├── rdap.py              ASN/contacts/country via ipwhois RDAP
+│   │   ├── whois.py             same via legacy port-43 WHOIS
+│   │   ├── geo_maxmind.py       country from a local MaxMind .mmdb (geoip2)
+│   │   ├── _rdap.py             shared RDAP helpers (contacts extraction)
+│   │   └── gunter.py            external Gunter HTTP service (geo-lookup + whois)
 │   └── locale/                  compiled translation catalogs (.mo)
 │       └── ru/LC_MESSAGES/pyresolv.mo
 ├── po/                          translation sources (.po) and template (.pot)

@@ -31,8 +31,10 @@ column dtypes, the same handling of empty values. This is guaranteed by:
 """
 from __future__ import annotations
 
+import ipaddress
 import os
 import sys
+from datetime import datetime
 from typing import List, Optional, Tuple
 
 import pandas as pd
@@ -46,6 +48,7 @@ from pyresolv.schema import (
     PANDAS_READ_KWARGS,
     SORT_CANDIDATES,
 )
+from pyresolv.subnets import assign_label, slice_filename
 
 
 def _sort_cols_and_order(present_groups: List[str]) -> Tuple[List[str], List[bool]]:
@@ -158,12 +161,53 @@ def _aggregate_streaming(
     return result, present_groups
 
 
+def write_split_by_subnet(
+    result: pd.DataFrame,
+    out_dir: str,
+    networks: List[ipaddress.IPv4Network],
+    prefix: str,
+    base_now: datetime,
+    start: int,
+    end: int,
+    time_unit: str,
+) -> int:
+    """Write the aggregation split into one CSV per subnet in `out_dir` (the
+    `--out-dir` mode). Rows are bucketed by the CIDR their `SrcIP` belongs to;
+    SrcIPs outside every listed subnet go to an `other` file. Returns the number
+    of rows written (== len(result))."""
+    if "SrcIP" not in result.columns:
+        raise ValueError(_("aggregate --out-dir needs a 'SrcIP' column to split by subnet"))
+    os.makedirs(out_dir, exist_ok=True)
+    labels = result["SrcIP"].map(lambda ip: assign_label(ip, networks))
+    written = 0
+    for label, group in result.groupby(labels, sort=True):
+        fname = slice_filename(prefix, label, base_now, start, end, time_unit)
+        group.to_csv(os.path.join(out_dir, fname), index=False)
+        print(
+            ngettext(
+                "[%(label)s] wrote %(n)s row -> %(file)s",
+                "[%(label)s] wrote %(n)s rows -> %(file)s",
+                len(group),
+            )
+            % {"label": label, "n": f"{len(group):,}", "file": fname},
+            file=sys.stderr,
+        )
+        written += len(group)
+    return written
+
+
 def aggregate(
     input_path: Optional[str],
     output_path: Optional[str],
     streaming: bool = True,
     chunk_size: int = DEFAULT_AGGREGATE_CHUNKSIZE,
     min_count: int = 1,
+    out_dir: Optional[str] = None,
+    networks: Optional[List[ipaddress.IPv4Network]] = None,
+    start: int = 1,
+    end: int = 0,
+    time_unit: str = "h",
+    prefix: str = "aggregation",
 ) -> int:
     is_real_file = input_path is not None and input_path != "-"
     file_size = os.path.getsize(input_path) if is_real_file else None
@@ -189,8 +233,13 @@ def aggregate(
     # the result stays byte-identical.
     result = _apply_min_count(result, min_count)
 
-    with open_output(output_path) as out_f:
-        result.to_csv(out_f, index=False)
+    if out_dir:
+        write_split_by_subnet(
+            result, out_dir, networks or [], prefix, datetime.now(), start, end, time_unit
+        )
+    else:
+        with open_output(output_path) as out_f:
+            result.to_csv(out_f, index=False)
 
     print(
         ngettext("Aggregated %(n)s row", "Aggregated %(n)s rows", len(result))

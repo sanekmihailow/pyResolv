@@ -3,3 +3,5 @@ tqdm==4.67.3
 requests
 pydantic-settings
 PyYAML
+ipwhois
+# Optional (geo_maxmind resolver): pip install -e '.[geo]'  -> geoip2

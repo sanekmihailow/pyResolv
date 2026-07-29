@@ -2,7 +2,7 @@
 # msgid — английский (исходный язык), msgstr — русский.
 msgid ""
 msgstr ""
-"Project-Id-Version: pyresolv 2.0.0\n"
+"Project-Id-Version: pyresolv 2.2.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Language: ru\n"
@@ -78,8 +78,12 @@ msgstr[1] "Отброшено %(n)s группы с count < %(min)s"
 msgstr[2] "Отброшено %(n)s групп с count < %(min)s"
 
 #: pyresolv/cli.py
-msgid "Resolver (default: from config, otherwise 'gunter')"
-msgstr "Резолвер (по умолчанию — из конфига, иначе 'gunter')"
+msgid ""
+"Resolver: default | rdap | whois | geo_maxmind | gunter (default: from config, "
+"otherwise 'default' = chain GEO->RDAP->WHOIS)"
+msgstr ""
+"Резолвер: default | rdap | whois | geo_maxmind | gunter (по умолчанию — из "
+"конфига, иначе 'default' = цепочка GEO->RDAP->WHOIS)"
 
 #: pyresolv/cli.py
 msgid "Key column for resolving, default %(col)s"
@@ -328,3 +332,60 @@ msgstr "Пайплайн завершён: %(n)s строк"
 #: pyresolv/runner.py
 msgid "Pipeline produced no data."
 msgstr "Пайплайн не произвёл данных."
+
+#: pyresolv/cli.py
+msgid ""
+"Instead of a single -o file, split the aggregation into one CSV per subnet "
+"(from GRAYLOG__SRC_IP_CIDR) in DIR; unmatched rows go to an 'other' file. "
+"Filenames carry the time slice from --start/--end/--time-unit. Mutually "
+"exclusive with -o/--output."
+msgstr ""
+"Вместо одного файла -o разложить агрегацию по одному CSV на подсеть (из "
+"GRAYLOG__SRC_IP_CIDR) в каталог DIR; строки вне подсетей — в файл 'other'. "
+"В имени файла — временной срез из --start/--end/--time-unit. Несовместимо "
+"с -o/--output."
+
+#: pyresolv/pipeline.py
+msgid "--out-dir and -o/--output are mutually exclusive"
+msgstr "--out-dir и -o/--output несовместимы"
+
+#: pyresolv/pipeline.py pyresolv/runner.py
+msgid ""
+"--out-dir needs subnets: set GRAYLOG__SRC_IP_CIDR in .env (see .env.example)."
+msgstr ""
+"Для --out-dir нужны подсети: задайте GRAYLOG__SRC_IP_CIDR в .env (см. .env.example)."
+
+#: pyresolv/stages/aggregate.py
+msgid "aggregate --out-dir needs a 'SrcIP' column to split by subnet"
+msgstr "для aggregate --out-dir нужна колонка 'SrcIP', чтобы делить по подсетям"
+
+#: pyresolv/stages/aggregate.py
+msgid "[%(label)s] wrote %(n)s row -> %(file)s"
+msgid_plural "[%(label)s] wrote %(n)s rows -> %(file)s"
+msgstr[0] "[%(label)s] записана %(n)s строка -> %(file)s"
+msgstr[1] "[%(label)s] записано %(n)s строки -> %(file)s"
+msgstr[2] "[%(label)s] записано %(n)s строк -> %(file)s"
+
+#: pyresolv/runner.py
+msgid "Note: -o is ignored because a step wrote to --out-dir."
+msgstr "Замечание: -o игнорируется, т.к. шаг записал в --out-dir."
+
+#: pyresolv/resolvers/rdap.py
+msgid "[rdap][%(ip)s] lookup failed: %(err)s"
+msgstr "[rdap][%(ip)s] ошибка запроса: %(err)s"
+
+#: pyresolv/resolvers/whois.py
+msgid "[whois][%(ip)s] lookup failed: %(err)s"
+msgstr "[whois][%(ip)s] ошибка запроса: %(err)s"
+
+#: pyresolv/resolvers/geo_maxmind.py
+msgid "geo_maxmind disabled (geoip2/mmdb unavailable): %(err)s"
+msgstr "geo_maxmind отключён (geoip2/mmdb недоступны): %(err)s"
+
+#: pyresolv/resolvers/geo_maxmind.py
+msgid "[geo_maxmind][%(ip)s] lookup failed: %(err)s"
+msgstr "[geo_maxmind][%(ip)s] ошибка запроса: %(err)s"
+
+#: pyresolv/resolvers/default_chain.py
+msgid "[default][%(name)s][%(ip)s] provider failed: %(err)s"
+msgstr "[default][%(name)s][%(ip)s] провайдер упал: %(err)s"

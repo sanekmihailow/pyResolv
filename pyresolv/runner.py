@@ -25,6 +25,7 @@ Params are validated with pydantic (`extra="forbid"`), so a typo like
 from __future__ import annotations
 
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Literal, Optional, Tuple
 
@@ -37,10 +38,11 @@ from pyresolv.io import open_output
 from pyresolv.resolvers.base import get_resolver
 from pyresolv.schema import DEFAULT_KEY_COLUMN, DEFAULT_RESOLVE_WORKERS
 from pyresolv.sources.base import get_source
-from pyresolv.stages.aggregate import aggregate_frame
+from pyresolv.stages.aggregate import aggregate_frame, write_split_by_subnet
 from pyresolv.stages.collect import collect_frame
 from pyresolv.stages.merge import merge_frames, read_frame
 from pyresolv.stages.trim import trim_frame
+from pyresolv.subnets import parse_cidrs
 
 # Stages that consume the running frame as their input (as opposed to producing
 # it themselves): if one of these is the first step, the engine reads the
@@ -69,6 +71,10 @@ class MergeParams(_StepParams):
 
 class AggregateParams(_StepParams):
     min_count: Optional[int] = None
+    out_dir: Optional[str] = None
+    start: int = 1
+    end: int = 0
+    time_unit: Literal["d", "h"] = "h"
 
 
 class ResolveParams(_StepParams):
@@ -96,7 +102,20 @@ def _run_merge(frame: Optional[pd.DataFrame], p: MergeParams, s: Settings) -> pd
 
 def _run_aggregate(frame: Optional[pd.DataFrame], p: AggregateParams, s: Settings) -> pd.DataFrame:
     min_count = p.min_count if p.min_count is not None else s.min_uniq_count
-    return aggregate_frame(_require_frame(frame, "aggregate"), min_count=min_count)
+    result = aggregate_frame(_require_frame(frame, "aggregate"), min_count=min_count)
+    if p.out_dir:
+        cidrs = s.graylog.src_ip_cidr if s.graylog else []
+        networks = parse_cidrs(cidrs)
+        if not networks:
+            raise ValueError(_(
+                "--out-dir needs subnets: set GRAYLOG__SRC_IP_CIDR in .env "
+                "(see .env.example)."
+            ))
+        write_split_by_subnet(
+            result, p.out_dir, networks, "aggregation", datetime.now(),
+            p.start, p.end, p.time_unit,
+        )
+    return result
 
 
 def _run_resolve(frame: Optional[pd.DataFrame], p: ResolveParams, s: Settings) -> pd.DataFrame:
@@ -193,6 +212,7 @@ def run_pipeline(
     if steps[0][0] in _NEEDS_INPUT:
         frame = read_frame(input_path)
 
+    wrote_to_dir = False
     for idx, (name, raw) in enumerate(steps, start=1):
         model_cls, runner = STEP_TABLE[name]
         try:
@@ -204,12 +224,19 @@ def run_pipeline(
             ) from None
         print(_("[%(i)d/%(n)d] %(step)s") % {"i": idx, "n": total, "step": name}, file=sys.stderr)
         frame = runner(frame, params, settings)
+        # A step with out_dir writes per-subnet files itself -> no single -o file.
+        if getattr(params, "out_dir", None):
+            wrote_to_dir = True
 
     if frame is None:  # pragma: no cover - guarded by load_pipeline_config
         raise ValueError(_("Pipeline produced no data."))
 
-    with open_output(output_path) as out_f:
-        frame.to_csv(out_f, index=False)
+    if wrote_to_dir:
+        if output_path not in (None, "-"):
+            print(_("Note: -o is ignored because a step wrote to --out-dir."), file=sys.stderr)
+    else:
+        with open_output(output_path) as out_f:
+            frame.to_csv(out_f, index=False)
 
     print(_("Pipeline finished: %(n)s rows") % {"n": f"{len(frame):,}"}, file=sys.stderr)
     return len(frame)

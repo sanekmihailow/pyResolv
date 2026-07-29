@@ -14,6 +14,7 @@ from pyresolv.config import get_settings
 from pyresolv.i18n import _
 from pyresolv.schema import COLLECT_COLUMNS
 from pyresolv.sources.base import Source, register_source
+from pyresolv.subnets import octet_prefix, parse_cidrs
 
 
 @register_source("graylog")
@@ -21,6 +22,9 @@ class GraylogSource(Source):
     def __init__(self) -> None:
         self._settings = get_settings().require_graylog()
         self._url = f"{self._settings.url}/{self._settings.index}_*/_search"
+        # CIDR subnets from GRAYLOG__SRC_IP_CIDR: used for the server-side prefix
+        # pre-filter and the exact client-side membership check below.
+        self._networks = parse_cidrs(self._settings.src_ip_cidr)
 
     def _build_payload(self, time_gte: str, time_lt: str, search_after: Optional[list] = None) -> dict:
         s = self._settings
@@ -58,15 +62,17 @@ class GraylogSource(Source):
                 }
             })
 
-        if s.src_ip_regex:
-            # Multiple regexes are OR-combined: SrcIP must match at least one
-            # pattern (minimum_should_match=1). For a single pattern the behavior
-            # is identical to the old single regexp filter.
+        if self._networks:
+            # SrcIP is a STRING field holding a plain dotted-quad IPv4 (no mask),
+            # so a CIDR term query does not apply. We narrow server-side with a
+            # `prefix` query on the octet-aligned prefix of each subnet
+            # (10.2.83.0/25 -> "10.2.83.", i.e. the enclosing /24), OR-combined;
+            # the exact mask is enforced client-side in fetch_window.
             payload["query"]["bool"]["filter"].append({
                 "bool": {
                     "should": [
-                        {"regexp": {"SrcIP": {"value": pattern}}}
-                        for pattern in s.src_ip_regex
+                        {"prefix": {"SrcIP": octet_prefix(net)}}
+                        for net in self._networks
                     ],
                     "minimum_should_match": 1,
                 }
@@ -121,6 +127,11 @@ class GraylogSource(Source):
                     if src_ip_obj.version != 4 or dst_ip_obj.version != 4:
                         continue
                     if dst_ip_obj.is_private:
+                        continue
+                    # Exact CIDR match: the server-side `prefix` filter only
+                    # narrows to the enclosing /24, so pin down the precise mask
+                    # (e.g. /25) here. No CIDRs configured -> no extra filtering.
+                    if self._networks and not any(src_ip_obj in net for net in self._networks):
                         continue
 
                     yield {col: source.get(col) for col in COLLECT_COLUMNS}

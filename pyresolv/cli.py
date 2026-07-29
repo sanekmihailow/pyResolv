@@ -141,12 +141,26 @@ def build_parser() -> argparse.ArgumentParser:
             "(default: from config MIN_UNIQ_COUNT, otherwise 1 = keep all)."
         ),
     )
+    aggregate_group.add_argument(
+        "--out-dir",
+        default=None,
+        metavar="DIR",
+        help=_(
+            "Instead of a single -o file, split the aggregation into one CSV per "
+            "subnet (from GRAYLOG__SRC_IP_CIDR) in DIR; unmatched rows go to an "
+            "'other' file. Filenames carry the time slice from --start/--end/"
+            "--time-unit. Mutually exclusive with -o/--output."
+        ),
+    )
 
     resolve_group = parser.add_argument_group("resolve")
     resolve_group.add_argument(
         "--resolver",
         default=None,
-        help=_("Resolver (default: from config, otherwise 'gunter')"),
+        help=_(
+            "Resolver: default | rdap | whois | geo_maxmind | gunter "
+            "(default: from config, otherwise 'default' = chain GEO->RDAP->WHOIS)"
+        ),
     )
     resolve_group.add_argument(
         "--key-column",
@@ -172,6 +186,7 @@ def build_run_parser() -> argparse.ArgumentParser:
             "DataFrame flowing between steps (no CSV re-serialization)."
         ),
     )
+    parser.add_argument("--version", action="version", version=f"pyresolv {__version__}")
     _add_lang_argument(parser)
     parser.add_argument(
         "--config", "-c",

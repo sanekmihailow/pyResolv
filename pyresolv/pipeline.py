@@ -13,6 +13,7 @@ from pyresolv.resolvers.base import get_resolver
 from pyresolv.schema import DEFAULT_RESOLVE_WORKERS
 from pyresolv.sources.base import get_source
 from pyresolv.stages.aggregate import aggregate
+from pyresolv.subnets import parse_cidrs
 from pyresolv.stages.collect import collect
 from pyresolv.stages.merge import merge
 from pyresolv.stages.trim import trim
@@ -54,13 +55,33 @@ def run_merge(args: argparse.Namespace) -> int:
 
 
 def run_aggregate(args: argparse.Namespace) -> int:
-    min_count = args.min_count if args.min_count is not None else get_settings().min_uniq_count
+    settings = get_settings()
+    min_count = args.min_count if args.min_count is not None else settings.min_uniq_count
+
+    out_dir = getattr(args, "out_dir", None)
+    networks = None
+    if out_dir:
+        if args.output:
+            raise ValueError(_("--out-dir and -o/--output are mutually exclusive"))
+        cidrs = settings.graylog.src_ip_cidr if settings.graylog else []
+        networks = parse_cidrs(cidrs)
+        if not networks:
+            raise ValueError(_(
+                "--out-dir needs subnets: set GRAYLOG__SRC_IP_CIDR in .env "
+                "(see .env.example)."
+            ))
+
     return aggregate(
         input_path=args.input[0] if args.input else None,
         output_path=args.output,
         streaming=args.streaming,
         chunk_size=args.chunk_size,
         min_count=min_count,
+        out_dir=out_dir,
+        networks=networks,
+        start=args.start,
+        end=args.end,
+        time_unit=args.time_unit,
     )
 
 

@@ -1,7 +1,7 @@
 """Typed pyresolv configuration: pydantic-settings on top of .env.
 
 All operational constants that used to be hardcoded (OPENSEARCH_URL, INDEX,
-STREAM_ID, SRC_IP_LIST, SRC_IP_REGEX, GUNTER_BASE_URL, timeouts, worker counts)
+STREAM_ID, SRC_IP_LIST, SRC_IP_CIDR, GUNTER_BASE_URL, timeouts, worker counts)
 are read from here.
 
 Nested per-integration settings use the `__` delimiter:
@@ -43,9 +43,13 @@ class GraylogSettings(BaseModel):
     search_size: int = Field(default=5000, description="search_after page size")
     request_timeout: int = Field(default=300, description="HTTP request timeout to OpenSearch, seconds")
     src_ip_list: List[str] = Field(default_factory=list, description="List of SrcIPs for the terms filter")
-    src_ip_regex: List[str] = Field(
+    src_ip_cidr: List[str] = Field(
         default_factory=list,
-        description="List of SrcIP regex patterns (regexp queries, OR-combined). Empty -> filter not applied",
+        description=(
+            "List of source subnets in CIDR (e.g. 10.2.83.0/24, 10.2.83.0/25). Filters "
+            "collect (server-side prefix + exact client-side check) and defines the "
+            "aggregate --out-dir per-subnet buckets. Empty -> collect filter not applied"
+        ),
     )
 
 
@@ -53,6 +57,18 @@ class GunterSettings(BaseModel):
     base_url: str = Field(description="Base URL of the Gunter API")
     request_timeout: int = Field(default=30, description="HTTP request timeout to Gunter, seconds")
     max_workers: int = Field(default=3, description="Default number of resolving threads")
+
+
+class ResolveSettings(BaseModel):
+    """Settings for the native resolvers (rdap/whois/geo_maxmind/default). All
+    optional with defaults, so it constructs with no .env."""
+    mmdb_path: Optional[str] = Field(
+        default=None,
+        description="Path to a local MaxMind GeoLite2-City .mmdb for the geo_maxmind resolver. "
+        "Unset -> geo_maxmind yields nothing (country falls back to RDAP/WHOIS codes)",
+    )
+    rdap_timeout: int = Field(default=10, description="Socket timeout for the rdap resolver, seconds")
+    whois_timeout: int = Field(default=15, description="Socket timeout for the whois resolver, seconds")
 
 
 class Settings(BaseSettings):
@@ -65,7 +81,7 @@ class Settings(BaseSettings):
     )
 
     default_source: str = Field(default="graylog", description="Default source for --type collect")
-    default_resolver: str = Field(default="gunter", description="Default resolver for --type resolve")
+    default_resolver: str = Field(default="default", description="Default resolver for --type resolve")
     min_uniq_count: int = Field(
         default=1,
         ge=1,
@@ -78,6 +94,7 @@ class Settings(BaseSettings):
 
     graylog: Optional[GraylogSettings] = None
     gunter: Optional[GunterSettings] = None
+    resolve: ResolveSettings = Field(default_factory=ResolveSettings)
 
     def require_graylog(self) -> GraylogSettings:
         if self.graylog is None:

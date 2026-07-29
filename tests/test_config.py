@@ -34,7 +34,7 @@ def test_no_env_at_all_leaves_sections_none(monkeypatch):
     assert s.graylog is None
     assert s.gunter is None
     assert s.default_source == "graylog"
-    assert s.default_resolver == "gunter"
+    assert s.default_resolver == "default"
 
     with pytest.raises(ConfigError):
         s.require_graylog()
@@ -74,44 +74,40 @@ def test_src_ip_list_parsed_from_json_env(monkeypatch):
     assert s.graylog.src_ip_list == ["10.2.83.129", "10.2.83.130"]
 
 
-def test_src_ip_regex_parsed_as_list_from_json_env(monkeypatch):
+def test_src_ip_cidr_parsed_as_list_from_json_env(monkeypatch):
     _settings_with_env_file(monkeypatch, None)
     monkeypatch.setenv("GRAYLOG__URL", "http://localhost:9200")
     monkeypatch.setenv("GRAYLOG__STREAM_ID", "abc123")
-    # Inside JSON the backslash is escaped twice.
-    monkeypatch.setenv("GRAYLOG__SRC_IP_REGEX", r'["10\\.8\\.139\\.\\d+","10\\.9\\..*"]')
+    monkeypatch.setenv("GRAYLOG__SRC_IP_CIDR", '["10.2.83.0/24","10.2.83.0/25"]')
 
     s = Settings()
-    assert s.graylog.src_ip_regex == [r"10\.8\.139\.\d+", r"10\.9\..*"]
+    assert s.graylog.src_ip_cidr == ["10.2.83.0/24", "10.2.83.0/25"]
 
 
-def test_src_ip_regex_defaults_to_empty_list(monkeypatch):
+def test_src_ip_cidr_defaults_to_empty_list(monkeypatch):
     _settings_with_env_file(monkeypatch, None)
     monkeypatch.setenv("GRAYLOG__URL", "http://localhost:9200")
     monkeypatch.setenv("GRAYLOG__STREAM_ID", "abc123")
-    monkeypatch.delenv("GRAYLOG__SRC_IP_REGEX", raising=False)
+    monkeypatch.delenv("GRAYLOG__SRC_IP_CIDR", raising=False)
 
     s = Settings()
-    assert s.graylog.src_ip_regex == []
+    assert s.graylog.src_ip_cidr == []
 
 
-def test_regex_bug_fixed_no_stray_backslash():
-    """Historical bug: r"10\\.8\\.\\139\\.\\d+" had a stray "\\" before "139",
-    so "\\1" was read as a backreference group. Now GRAYLOG__SRC_IP_REGEX in
-    .env.example is a JSON array; we parse it and check that the patterns have
-    no spurious "\\139" (we deliberately skip the comment that quotes the old
-    bug)."""
+def test_env_example_src_ip_cidr_is_valid():
+    """GRAYLOG__SRC_IP_CIDR in .env.example is a JSON array of parseable CIDRs."""
     import json
     from pathlib import Path
 
+    from pyresolv.subnets import parse_cidrs
+
     env_example = Path(__file__).resolve().parents[1] / ".env.example"
-    regex_lines = [
+    cidr_lines = [
         line for line in env_example.read_text(encoding="utf-8").splitlines()
-        if line.startswith("GRAYLOG__SRC_IP_REGEX=")
+        if line.startswith("GRAYLOG__SRC_IP_CIDR=")
     ]
-    assert len(regex_lines) == 1
-    patterns = json.loads(regex_lines[0].split("=", 1)[1])
-    assert isinstance(patterns, list) and patterns
-    for pattern in patterns:
-        assert r"\139" not in pattern
-    assert patterns[0] == r"10\.8\.139\.\d+"
+    assert len(cidr_lines) == 1
+    cidrs = json.loads(cidr_lines[0].split("=", 1)[1])
+    assert isinstance(cidrs, list) and cidrs
+    # All entries parse without raising.
+    assert len(parse_cidrs(cidrs)) == len(set(cidrs))

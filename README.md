@@ -28,11 +28,18 @@ collect  ->  trim  ->  merge  ->  aggregate  ->  resolve
   memory, safe for very large files; `--no-streaming` enables full pandas
   full-load (faster on small files). Both modes produce byte-identical results.
   `--min-count` (or env `MIN_UNIQ_COUNT`, default `1` = keep all) filters out
-  groups with `count` below the threshold.
+  groups with `count` below the threshold. `--out-dir DIR` (instead of `-o`)
+  splits the result into one CSV per subnet from `GRAYLOG__SRC_IP_CIDR`
+  (unmatched rows → an `other` file); filenames carry the time slice, e.g.
+  `aggregation_10.2.83.0-24__2026-07-23__2026-07-28__time-12-10.csv`.
 - **resolve** — enriches rows by key column (`--key-column`, default `DstIP`)
-  via a resolver (`--resolver`, default `gunter`): adds `country`, `asn`,
-  `asn_descr`, `contacts`. Idempotent: already-filled rows are not resolved
-  again and do not make network calls.
+  via a resolver (`--resolver`), adding `country`, `asn`, `asn_descr`,
+  `contacts`. Resolvers: **`default`** (a self-contained chain GEO → RDAP →
+  WHOIS), `rdap` / `whois` (single provider, via `ipwhois`), `geo_maxmind`
+  (country from a local MaxMind `.mmdb` — set `RESOLVE__MMDB_PATH` and
+  `pip install -e '.[geo]'`), and `gunter` (the external HTTP service).
+  Idempotent: already-filled rows are not resolved again and make no network
+  calls.
 
 Sources and resolvers are plugins, registered by name
 (`pyresolv/sources/`, `pyresolv/resolvers/`); to add a new source
@@ -50,6 +57,7 @@ pyResolv/
 │   ├── config.py                typed configuration (pydantic-settings) from .env
 │   ├── schema.py                single source of the CSV schema: columns, sort order, read kwargs
 │   ├── io.py                    open_input/open_output: path -> file, None/'-' -> stdin/stdout
+│   ├── subnets.py               ipaddress helpers: CIDR parsing, octet prefix, labels, split filenames
 │   ├── i18n.py                  localization via gettext (_/ngettext, setup)
 │   ├── stages/                  filter stages
 │   │   ├── collect.py           pulls records from a source by time windows
@@ -61,7 +69,12 @@ pyResolv/
 │   │   └── graylog.py           OpenSearch _search + search_after pagination
 │   ├── resolvers/               resolver plugins for `resolve`
 │   │   ├── base.py              Resolver ABC + RESOLVERS registry + ThreadPool/cache/idempotency
-│   │   └── gunter.py            geo-lookup + whois HTTP calls
+│   │   ├── default_chain.py     `default` resolver: chain GEO -> RDAP -> WHOIS
+│   │   ├── rdap.py              ASN/contacts/country via ipwhois RDAP
+│   │   ├── whois.py             same via legacy port-43 WHOIS
+│   │   ├── geo_maxmind.py       country from a local MaxMind .mmdb (geoip2)
+│   │   ├── _rdap.py             shared RDAP helpers (contacts extraction)
+│   │   └── gunter.py            external Gunter HTTP service (geo-lookup + whois)
 │   └── locale/                  compiled translation catalogs (.mo)
 │       └── ru/LC_MESSAGES/pyresolv.mo
 ├── po/                          translation sources (.po) and template (.pot)

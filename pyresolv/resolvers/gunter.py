@@ -10,41 +10,13 @@ import requests
 
 from pyresolv.config import get_settings
 from pyresolv.i18n import _
+from pyresolv.resolvers._rdap import _safe_get, contacts_from_objects
 from pyresolv.resolvers.base import Resolver, register_resolver
 
 
-def _safe_get(data: dict, *keys, default=None):
-    current = data
-    for key in keys:
-        if not isinstance(current, dict):
-            return default
-        current = current.get(key)
-        if current is None:
-            return default
-    return current
-
-
 def _extract_contacts(whois_data: dict) -> str:
-    objects = _safe_get(whois_data, "ip_whois", "objects", default=[])
-    if not isinstance(objects, list):
-        return ""
-
-    contacts = []
-    for item in objects:
-        if not isinstance(item, dict):
-            continue
-        name = _safe_get(item, "contact", "name", default="")
-        if name:
-            contacts.append(str(name).strip())
-
-    unique_contacts = []
-    seen = set()
-    for name in contacts:
-        if name and name not in seen:
-            seen.add(name)
-            unique_contacts.append(name)
-
-    return "; ".join(unique_contacts)
+    """Contacts from a gunter /whois response (RDAP `objects` under `ip_whois`)."""
+    return contacts_from_objects(_safe_get(whois_data, "ip_whois", "objects", default={}))
 
 
 @register_resolver("gunter")

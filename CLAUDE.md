@@ -49,6 +49,7 @@ pyresolv/
   config.py          pydantic-settings: nested per-integration settings loaded from .env
   schema.py           CANONICAL_COLUMNS / DROP_COLS / GROUP_COLS / sort order / pandas read kwargs — single source
   io.py                open_input/open_output: path -> file, None/'-' -> stdin/stdout
+  subnets.py          ipaddress helpers: CIDR parsing, octet-prefix, subnet labels, split filenames
   pipeline.py         --type -> stage dispatcher (Variant A: one stage per process)
   runner.py           single-process pipeline engine + YAML config (Variant B)
   cli.py               argparse; exports main(); routes the `run` subcommand to runner.py
@@ -59,7 +60,11 @@ pyresolv/
     collect.py, trim.py, merge.py, aggregate.py
   resolvers/
     base.py             Resolver ABC + RESOLVERS registry; ThreadPool, cache, idempotent skip
-    gunter.py            geo-lookup + whois HTTP calls
+    default_chain.py    `default` resolver: composite chain GEO -> RDAP -> WHOIS
+    rdap.py / whois.py   native ASN/contacts/country via ipwhois (RDAP / port-43)
+    geo_maxmind.py       country from a local MaxMind .mmdb (optional geoip2)
+    _rdap.py             shared RDAP helpers (safe_get + contacts extraction)
+    gunter.py            external Gunter HTTP service (geo-lookup + whois)
 ```
 
 **CSV wire format between stages**: fixed-header CSV. All pandas reads across the package share
@@ -93,9 +98,11 @@ raising (a failed stage keeps its input); never deletes stdin (`-`/no path) or a
 **Stages** (`pyresolv/stages/`):
 1. **collect** — `sources/graylog.py` pages OpenSearch via `search_after` (page size from
    `GRAYLOG__SEARCH_SIZE`), filters to IPv4 with non-private `DstIP`, applies optional `SrcIP` allowlist
-   (`GRAYLOG__SRC_IP_LIST`, a `terms` query) and/or regex (`GRAYLOG__SRC_IP_REGEX`, a **list** of patterns
-   OR-combined via `bool.should` + `minimum_should_match=1`) filters at the OpenSearch query level.
-   `--source` picks the source by name (`sources.SOURCES` registry); default comes from
+   (`GRAYLOG__SRC_IP_LIST`, a `terms` query) and/or subnet filter (`GRAYLOG__SRC_IP_CIDR`, a **list** of
+   CIDRs). `SrcIP` is a string field holding a plain dotted-quad IPv4 (no mask), so CIDR filtering is a
+   server-side `prefix` query on the octet-aligned prefix (`bool.should` + `minimum_should_match=1`, narrowing
+   a /25 to its enclosing /24) plus an **exact client-side `ipaddress` check** in `fetch_window` (pins down
+   finer masks). `--source` picks the source by name (`sources.SOURCES` registry); default comes from
    `settings.default_source`, then falls back to `"graylog"`.
 2. **trim** — drops `schema.DROP_COLS`, chunked read/write (`schema.DEFAULT_TRIM_CHUNKSIZE`, 10k rows). The
    tqdm progress bar tracks actual bytes consumed from the input file handle (`f.tell()`), not the pandas
@@ -117,33 +124,51 @@ raising (a failed stage keeps its input); never deletes stdin (`-`/no path) or a
    aggregated groups whose `count` is below the threshold — applied *after* the full aggregation (in streaming the
    group's final count is only known once all chunks are summed), identically in both modes, so the byte-identical
    guarantee holds. This is the one config value `aggregate` reads (a plain top-level `Settings` field, needs no
-   integration configured).
+   integration configured). **`--out-dir DIR`** (mutually exclusive with `-o`) splits the final aggregation into
+   one CSV per subnet instead of a single file: rows are bucketed by their `SrcIP`'s CIDR (from
+   `GRAYLOG__SRC_IP_CIDR`, resolved to `ipaddress` networks in `pipeline.run_aggregate`/`runner` and passed in,
+   so the stage stays config-decoupled), unmatched rows go to an `other` file, and filenames carry the time slice
+   from `--start`/`--end`/`--time-unit` (`pyresolv/subnets.py::slice_filename`, e.g.
+   `aggregation_10.2.83.0-24__2026-07-23__2026-07-28__time-12-10.csv`). Requires a non-empty `SRC_IP_CIDR`.
 5. **resolve** — `resolvers/base.py` has the generic mechanics (ThreadPoolExecutor, `--workers`, per-key cache,
    `_is_already_enriched` idempotent skip — a row is skipped if `country`/`asn`/`asn_descr`/`contacts` are all
-   already non-empty); `resolvers/gunter.py` implements only `resolve_one(ip)` (geo-lookup + whois + contact
-   extraction). `--resolver` picks by name (`resolvers.RESOLVERS` registry); default from
-   `settings.default_resolver`, then `"gunter"`.
+   already non-empty); each resolver implements only `resolve_one(ip) -> dict`. `--resolver` picks by name
+   (`resolvers.RESOLVERS` registry); default from `settings.default_resolver`, then `"default"`. Resolvers:
+   **`default`** (`default_chain.py`) runs providers GEO → RDAP → WHOIS, filling each `RESOLVE_COLUMN` from the
+   first provider that returns a non-empty value and stopping early once all are filled; **`rdap`**/**`whois`**
+   do ASN/description/contacts/country via `ipwhois` (`lookup_rdap` / `lookup_whois`); **`geo_maxmind`** reads
+   country from a local MaxMind `.mmdb` via `geoip2` (optional extra — no path/lib → yields nothing);
+   **`gunter`** still calls the external HTTP service. Providers return a full `_empty_result()`-padded dict
+   (so partial fills are safe with `base.enrich`), never raise (log + return partial), and read timeouts/mmdb
+   path from `settings.resolve` (`RESOLVE__*`). Contact extraction (RDAP `objects` is a dict keyed by handle)
+   lives in `_rdap.py`, shared by `rdap` and `gunter`. Caveat: `country` can be a MaxMind name or a 2-letter
+   RDAP/WHOIS code; direct RDAP/WHOIS per unique IP is rate-limit-sensitive on bulk runs.
 
 ## Configuration (`pyresolv/config.py`, `.env`)
 
 All previously-hardcoded operational constants (`OPENSEARCH_URL`, `INDEX`, `STREAM_ID`, `SRC_IP_LIST`,
-`SRC_IP_REGEX`, `GUNTER_BASE_URL`, timeouts, worker counts) now live in `.env` (see `.env.example`), loaded via
+`SRC_IP_CIDR`, `GUNTER_BASE_URL`, timeouts, worker counts) now live in `.env` (see `.env.example`), loaded via
 `pydantic-settings`. Nested settings use the `__` delimiter: `GRAYLOG__URL`, `GRAYLOG__STREAM_ID`,
 `GUNTER__BASE_URL`, etc.
 
 `Settings.graylog`/`Settings.gunter` are `Optional` — stages that don't need an integration (`trim`, `merge`,
 `aggregate`) never require one. (`aggregate` does read the top-level `min_uniq_count` field for `--min-count`'s
 default, but that is a plain scalar with a default — it constructs fine with no integration configured.) Stages
-that do (`collect` -> graylog, `resolve` -> gunter) fetch their
+that do the external HTTP integrations (`collect` -> graylog, `resolve --resolver gunter` -> gunter) fetch their
 section via `settings.require_graylog()`/`require_gunter()`, which raises a clear `ConfigError` (caught in
 `cli.py`, printed to stderr, exit code 2) if the section is entirely absent. If a section is *partially* filled
 in (e.g. `GRAYLOG__URL` set but `GRAYLOG__STREAM_ID` missing), `pydantic_settings.BaseSettings` itself raises a
-`ValidationError` at `Settings()` construction time — i.e. at the very start of the run, not mid-stream.
+`ValidationError` at `Settings()` construction time — i.e. at the very start of the run, not mid-stream. The
+**native resolvers** (`default`/`rdap`/`whois`/`geo_maxmind`) read `settings.resolve` (`ResolveSettings`, a
+top-level section with all-defaulted fields — `RESOLVE__MMDB_PATH`, `RESOLVE__RDAP_TIMEOUT`,
+`RESOLVE__WHOIS_TIMEOUT`), so they construct with no `.env` at all.
 
-Two historical bugs fixed during the migration:
-- `SRC_IP_REGEX` had a stray backslash: `r"10\.8\.\139\.\d+"` — the `\1` was an unintended backreference.
-  `GRAYLOG__SRC_IP_REGEX` is now a JSON list of patterns (like `SRC_IP_LIST`); backslashes are doubled inside
-  JSON, so `.env.example` has `GRAYLOG__SRC_IP_REGEX=["10\\.8\\.139\\.\\d+"]` (parses to `10\.8\.139\.\d+`).
+Source-IP filtering for `collect` uses `GRAYLOG__SRC_IP_LIST` (exact IPs, `terms`) and/or
+`GRAYLOG__SRC_IP_CIDR` (a JSON list of CIDR subnets, e.g. `["10.2.83.0/24"]`). `SRC_IP_CIDR` doubles as the
+bucket definition for `aggregate --out-dir`. It replaced the earlier `SRC_IP_REGEX` (regex patterns) — regex
+can't express arbitrary masks like /25, CIDR can, and `ipaddress` handles the math (`pyresolv/subnets.py`).
+
+Historical bug fixed during the migration:
 - `trim`'s tqdm progress bar mismatched units (see stage description above).
 
 ## Localization (`pyresolv/i18n.py`, `po/`, `pyresolv/locale/`)
