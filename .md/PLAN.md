@@ -1,66 +1,66 @@
-# План: рефакторинг pyResolv в расширяемый набор стадий-фильтров
+# Plan: refactor pyResolv into an extensible set of filter stages
 
 ## Context
 
-Сейчас проект — два почти дублирующихся монолита:
-- `get_dst_ip_ranges.py` — сбор из OpenSearch (Graylog-бэкенд) по окнам времени + merge + trim + aggregate + enrich, всё внутри `main()` и переключается булевыми флагами (`--merge`, `--aggregate`, `--enrich`).
-- `resolver.py` — отдельно тот же trim + aggregate для готового CSV.
-- `api/gunter/resolve.py` — обогащение IP через Gunter.
+Today the project is two nearly-duplicated monoliths:
+- `get_dst_ip_ranges.py` — collect from OpenSearch (Graylog backend) by time windows + merge + trim + aggregate + enrich, all inside `main()` and toggled by boolean flags (`--merge`, `--aggregate`, `--enrich`).
+- `resolver.py` — the same trim + aggregate, separately, for a ready CSV.
+- `api/gunter/resolve.py` — IP enrichment via Gunter.
 
-Проблемы, которые устраняем:
-1. Операционные параметры (`OPENSEARCH_URL`, `INDEX`, `STREAM_ID`, `SRC_IP_LIST`, `SRC_IP_REGEX`, `GUNTER_BASE_URL`, таймауты, число воркеров) зашиты в код.
-2. Единственный источник (OpenSearch/Graylog) и единственный резолвер (Gunter) жёстко вшиты — нельзя добавить Elasticsearch/Mongo или самописный резолвер без правки ядра.
-3. Схема данных (`DROP_COLS`, `GROUP_COLS`) продублирована в двух файлах.
-4. Набор булевых флагов вместо чёткой модели «одна стадия = одно действие».
+Problems we are removing:
+1. Operational parameters (`OPENSEARCH_URL`, `INDEX`, `STREAM_ID`, `SRC_IP_LIST`, `SRC_IP_REGEX`, `GUNTER_BASE_URL`, timeouts, worker counts) are hardcoded.
+2. The single source (OpenSearch/Graylog) and single resolver (Gunter) are hardwired — you can't add Elasticsearch/Mongo or a custom resolver without editing the core.
+3. The data schema (`DROP_COLS`, `GROUP_COLS`) is duplicated across two files.
+4. A set of boolean flags instead of a clear "one stage = one action" model.
 
-Целевой результат: набор composable-стадий (Unix-фильтры), соединяемых шелл-пайпами; источники и резолверы — плагины по имени; конфигурация типизирована и вынесена из кода.
+Target outcome: a set of composable stages (Unix filters) connected by shell pipes; sources and resolvers as name-registered plugins; typed configuration moved out of the code.
 
-## Зафиксированные решения
+## Locked decisions
 
-- **Композиция:** шелл-пайпы. Одна стадия = один запуск, читает stdin/`-i`, пишет stdout/`-o`. In-process пайплайн по конфигу — НЕ делаем (можно добавить позже поверх тех же стадий).
-- **Конфиг:** `pydantic-settings` поверх `.env`, вложенные модели с namespace на интеграцию (`GRAYLOG__URL`, `GUNTER__BASE_URL` и т.д.).
-- **Aggregate:** по умолчанию текущий pandas full-load (быстро, векторно). Флаг `--streaming` (+`--chunk-size`, дефолт 500_000) переключает в чанковый pandas для очень больших файлов (сотни млн строк) — читаем кусками, `groupby` на каждом куске, суммируем частичные счётчики.
-- **merge:** остаётся как узкая стадия «склеить несколько входов в один поток».
-- **Выбор источника:** `--source` необязателен. Приоритет: CLI `--source` → `settings.default_source` → `"graylog"`.
-- **Выбор резолвера:** `--resolver` необязателен. Приоритет: CLI `--resolver` → `settings.default_resolver` → `"gunter"`.
-- **Формат «провода» между стадиями:** CSV с фиксированным заголовком (заголовок несёт схему).
+- **Composition:** shell pipes. One stage = one run, reads stdin/`-i`, writes stdout/`-o`. An in-process config-driven pipeline is NOT built here (it can be added later on top of the same stages).
+- **Config:** `pydantic-settings` over `.env`, nested models with a per-integration namespace (`GRAYLOG__URL`, `GUNTER__BASE_URL`, etc.).
+- **Aggregate:** by default the current pandas full-load (fast, vectorized). The `--streaming` flag (+`--chunk-size`, default 500_000) switches to chunked pandas for very large files (hundreds of millions of rows) — read in chunks, `groupby` per chunk, sum the partial counts.
+- **merge:** stays a narrow stage "concatenate several inputs into one stream".
+- **Source selection:** `--source` is optional. Priority: CLI `--source` → `settings.default_source` → `"graylog"`.
+- **Resolver selection:** `--resolver` is optional. Priority: CLI `--resolver` → `settings.default_resolver` → `"gunter"`.
+- **Wire format between stages:** CSV with a fixed header (the header carries the schema).
 
-## Целевая структура
+## Target layout
 
 ```
 pyresolv/
-  config.py          # pydantic-settings: вложенные настройки на интеграцию, load из .env
-  schema.py          # CANONICAL_COLUMNS, DROP_COLS, GROUP_COLS, порядок сортировки — единый источник
+  config.py          # pydantic-settings: nested per-integration settings, loaded from .env
+  schema.py          # CANONICAL_COLUMNS, DROP_COLS, GROUP_COLS, sort order — single source
   io.py              # read_records(path|stdin)->Iterator[dict]; write_records(iter, path|stdout); CSV
-  pipeline.py        # диспетчер --type -> стадия
-  cli.py             # argparse; экспортирует main(), точка входа: if __name__ == "__main__": main()
+  pipeline.py        # --type -> stage dispatcher
+  cli.py             # argparse; exports main(), entry point: if __name__ == "__main__": main()
   sources/
-    base.py          # ABC Source + реестр SOURCES + @register_source; общая итерация окон времени
-    graylog.py       # перенос логики get_dst_ip_ranges (OpenSearch _search + search_after)
+    base.py          # Source ABC + SOURCES registry + @register_source; shared time-window iteration
+    graylog.py       # ported get_dst_ip_ranges logic (OpenSearch _search + search_after)
   stages/
-    trim.py          # перенос trim_csv (чанковое чтение уже есть)
-    aggregate.py     # aggregate_csv + режим --streaming (чанковый)
-    merge.py         # перенос merge_files_by_creation_time -> склейка нескольких -i/stdin
+    trim.py          # ported trim_csv (chunked reading already present)
+    aggregate.py     # aggregate_csv + --streaming mode (chunked)
+    merge.py         # ported merge_files_by_creation_time -> concatenate several -i/stdin
   resolvers/
-    base.py          # ABC Resolver + реестр RESOLVERS; ОБЩЕЕ: ThreadPool, кэш по ключу, идемпотентный пропуск
-    gunter.py        # перенос api/gunter/resolve.py: только geo-lookup + whois (resolve_one)
+    base.py          # Resolver ABC + RESOLVERS registry; SHARED: ThreadPool, per-key cache, idempotent skip
+    gunter.py        # ported api/gunter/resolve.py: only geo-lookup + whois (resolve_one)
 ```
 
-Пакет делаем настоящим (`__init__.py`), т.к. сейчас `api/` — namespace-пакет без `__init__.py` и требует запуска из корня. Точку входа оставляем в классической идиоме: `cli.py` определяет `main()`, вызов через `if __name__ == "__main__": main()` (без `__main__.py`).
+We make it a real package (`__init__.py`), since `api/` is currently a namespace package with no `__init__.py` and must be run from the repo root. The entry point stays in the classic idiom: `cli.py` defines `main()`, invoked via `if __name__ == "__main__": main()` (no `__main__.py`).
 
 ## CLI (spec)
 
-Общие флаги:
-- `--type {collect,trim,merge,aggregate,resolve}` — обязательный, какая стадия.
-- `-i, --input PATH` — вход; по умолчанию stdin. Для `collect` игнорируется (источник генерирует). Для `merge` допускается несколько раз.
-- `-o, --output PATH` — выход; по умолчанию stdout.
+Common flags:
+- `--type {collect,trim,merge,aggregate,resolve}` — required, which stage.
+- `-i, --input PATH` — input; stdin by default. Ignored for `collect` (the source generates data). May be given multiple times for `merge`.
+- `-o, --output PATH` — output; stdout by default.
 
-Пер-стадийные:
-- `collect`: `--source NAME` (дефолт из конфига → graylog), `--start`, `--end`, `--time-unit {d,h}`. Фильтры источника (список/regex SrcIP) — из конфига.
-- `aggregate`: `--streaming` (флаг, дефолт off), `--chunk-size N` (дефолт 500_000).
-- `resolve`: `--resolver NAME` (дефолт из конфига → gunter), `--key-column` (дефолт `DstIP`), `--workers N`.
+Per-stage:
+- `collect`: `--source NAME` (default from config → graylog), `--start`, `--end`, `--time-unit {d,h}`. Source filters (SrcIP list/regex) come from config.
+- `aggregate`: `--streaming` (flag, default off), `--chunk-size N` (default 500_000).
+- `resolve`: `--resolver NAME` (default from config → gunter), `--key-column` (default `DstIP`), `--workers N`.
 
-Пример композиции:
+Composition example:
 ```bash
 pyresolv --type collect --source graylog --start 5 --end 0 --time-unit h \
   | pyresolv --type trim \
@@ -68,31 +68,31 @@ pyresolv --type collect --source graylog --start 5 --end 0 --time-unit h \
   | pyresolv --type resolve --resolver gunter -o out.csv
 ```
 
-## Ключевые абстракции (переиспользуем существующую логику)
+## Key abstractions (reusing existing logic)
 
-**Source** (`sources/base.py`): ABC с `fetch(windows) -> Iterator[dict]`; база даёт итерацию окон времени (`build_time_windows`, `shift_now`, `build_time_expr` из текущего `get_dst_ip_ranges.py`). `graylog.py` реализует только `fetch_window(gte, lt)` — перенос `build_payload` + `process_window` (пагинация search_after, фильтр IPv4/не-приватный DstIP). Реестр `SOURCES[name]` + декоратор `@register_source("graylog")`.
+**Source** (`sources/base.py`): an ABC with `fetch(windows) -> Iterator[dict]`; the base provides time-window iteration (`build_time_windows`, `shift_now`, `build_time_expr` from the current `get_dst_ip_ranges.py`). `graylog.py` implements only `fetch_window(gte, lt)` — porting `build_payload` + `process_window` (search_after pagination, IPv4 / non-private DstIP filter). Registry `SOURCES[name]` + decorator `@register_source("graylog")`.
 
-**Resolver** (`resolvers/base.py`): вся общая механика из `enrich_csv_with_gunter` — ThreadPool (`max_workers`, дефолт из конфига), кэш по ключу, идемпотентный пропуск через `_is_already_enriched`, обратная запись колонок `country/asn/asn_descr/contacts`. Подкласс реализует только `resolve_one(key) -> dict`. `gunter.py` = `_fetch_country` + `_fetch_whois` + `_extract_contacts`. Реестр `RESOLVERS[name]`.
+**Resolver** (`resolvers/base.py`): all the shared mechanics from `enrich_csv_with_gunter` — ThreadPool (`max_workers`, default from config), per-key cache, idempotent skip via `_is_already_enriched`, writing the `country/asn/asn_descr/contacts` columns back. A subclass implements only `resolve_one(key) -> dict`. `gunter.py` = `_fetch_country` + `_fetch_whois` + `_extract_contacts`. Registry `RESOLVERS[name]`.
 
-**Schema** (`schema.py`): переносим `DROP_COLS`, `GROUP_COLS`, кандидаты сортировки — единожды. Источники маппят сырые поля → каноничные.
+**Schema** (`schema.py`): move `DROP_COLS`, `GROUP_COLS`, sort candidates — defined once. Sources map raw fields → canonical.
 
-**Config** (`config.py`): вложенные `BaseSettings` — `GraylogSettings`, `GunterSettings`, плюс корневые `default_source`, `default_resolver`. Значения из `.env` (создать `.env.example`). Валидация на старте.
+**Config** (`config.py`): nested `BaseSettings` — `GraylogSettings`, `GunterSettings`, plus root-level `default_source`, `default_resolver`. Values from `.env` (create `.env.example`). Validated at startup.
 
-## Миграция текущего кода
+## Migrating the current code
 
-- `get_dst_ip_ranges.py`: окна → `sources/base.py`; payload+пагинация → `sources/graylog.py`; `trim_csv` → `stages/trim.py`; `aggregate_csv` → `stages/aggregate.py`; `merge_files_by_creation_time` → `stages/merge.py`; константы → `config.py`.
-- `api/gunter/resolve.py`: generic → `resolvers/base.py`, HTTP-специфика → `resolvers/gunter.py`.
-- `main()`: сохраняется как единая точка входа в `cli.py` (идиома `if __name__ == "__main__": main()`); из старого `main()` в `get_dst_ip_ranges.py` переносится только диспетчеризация аргументов в стадии, сама функция не удаляется.
-- `resolver.py`: удаляем (его функциональность = `trim` + `aggregate` стадии).
-- `requirements.txt`: добавить `pydantic-settings` (тянет `python-dotenv`).
-- Починить попутно: `SRC_IP_REGEX` с лишним `\` (`r"10\.8\.\139\.\d+"`); tqdm total в байтах vs update по in-memory размеру.
+- `get_dst_ip_ranges.py`: windows → `sources/base.py`; payload+pagination → `sources/graylog.py`; `trim_csv` → `stages/trim.py`; `aggregate_csv` → `stages/aggregate.py`; `merge_files_by_creation_time` → `stages/merge.py`; constants → `config.py`.
+- `api/gunter/resolve.py`: generic → `resolvers/base.py`, HTTP specifics → `resolvers/gunter.py`.
+- `main()`: kept as the single entry point in `cli.py` (the `if __name__ == "__main__": main()` idiom); from the old `main()` in `get_dst_ip_ranges.py` only the argument dispatch into stages moves over, the function itself is not deleted.
+- `resolver.py`: removed (its functionality = the `trim` + `aggregate` stages).
+- `requirements.txt`: add `pydantic-settings` (pulls in `python-dotenv`).
+- Fix along the way: `SRC_IP_REGEX` with a stray `\` (`r"10\.8\.\139\.\d+"`); tqdm total in bytes vs update by in-memory size.
 
 ## Verification
 
-- Малый эталонный CSV (5–10 строк, как в обсуждении) прогнать через каждую стадию по отдельности, сверить выход.
-- Композиция пайпом end-to-end: `collect|trim|aggregate|resolve`.
-- **Ключевой тест эквивалентности:** `aggregate` без флага и `aggregate --streaming` на одном входе должны дать идентичный отсортированный результат.
-- `resolve` дважды подряд по одному файлу — второй прогон не дёргает сеть (идемпотентность `_is_already_enriched`).
-- `--source` не задан → падаем в `graylog`; заданный неизвестный `--source`/`--resolver` → понятная ошибка из реестра.
-- Отсутствие обязательной настройки в `.env` → валидатор pydantic падает с внятным сообщением на старте, а не в середине.
-- `collect` требует живой OpenSearch — проверяем на реальном стенде либо мокаем HTTP; остальные стадии проверяются офлайн.
+- Run a small reference CSV (5–10 rows, as in the discussion) through each stage separately, compare the output.
+- End-to-end pipe composition: `collect|trim|aggregate|resolve`.
+- **Key equivalence test:** `aggregate` without the flag and `aggregate --streaming` on the same input must produce an identical sorted result.
+- `resolve` twice in a row on the same file — the second run makes no network calls (idempotency of `_is_already_enriched`).
+- `--source` not set → falls back to `graylog`; an unknown `--source`/`--resolver` → a clear error from the registry.
+- A required `.env` setting missing → the pydantic validator fails with a clear message at startup, not mid-run.
+- `collect` requires a live OpenSearch — test against a real instance or mock HTTP; the other stages are verified offline.
