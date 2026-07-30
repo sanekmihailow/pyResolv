@@ -20,14 +20,20 @@ from pyresolv.schema import RESOLVE_COLUMNS
 class _FakeIPWhois:
     """Configurable stand-in for ipwhois.IPWhois. Class attrs hold the payloads."""
     rdap_result: dict = {}
+    rdap_bootstrap_result: dict = {}  # returned when lookup_rdap(bootstrap=True)
     whois_result: dict = {}
-    raise_on = None  # "rdap" | "whois" | None
+    raise_on = None  # "rdap" | "rdap_primary" | "whois" | None
+    bootstrap_calls = 0  # how many times lookup_rdap ran with bootstrap=True
 
     def __init__(self, ip, timeout=None):
         self.ip = ip
 
-    def lookup_rdap(self, depth=1):
-        if _FakeIPWhois.raise_on == "rdap":
+    def lookup_rdap(self, depth=1, bootstrap=False):
+        if bootstrap:
+            _FakeIPWhois.bootstrap_calls += 1
+            return _FakeIPWhois.rdap_bootstrap_result
+        # "rdap" fails both paths; "rdap_primary" fails only the ASN-based call.
+        if _FakeIPWhois.raise_on in ("rdap", "rdap_primary"):
             raise RuntimeError("boom")
         return _FakeIPWhois.rdap_result
 
@@ -40,9 +46,18 @@ class _FakeIPWhois:
 @pytest.fixture(autouse=True)
 def _reset_fake():
     _FakeIPWhois.rdap_result = {}
+    _FakeIPWhois.rdap_bootstrap_result = {}
     _FakeIPWhois.whois_result = {}
     _FakeIPWhois.raise_on = None
+    _FakeIPWhois.bootstrap_calls = 0
     yield
+
+
+def _rdap_resolver(bootstrap=False):
+    r = RdapResolver.__new__(RdapResolver)
+    r._timeout = 10
+    r._bootstrap = bootstrap
+    return r
 
 
 RDAP_RESULT = {
@@ -63,22 +78,60 @@ RDAP_RESULT = {
 def test_rdap_maps_all_fields(monkeypatch):
     monkeypatch.setattr(rdap_mod, "IPWhois", _FakeIPWhois)
     _FakeIPWhois.rdap_result = RDAP_RESULT
-    r = RdapResolver.__new__(RdapResolver)
-    r._timeout = 10
-    out = r.resolve_one("150.171.109.182")
+    out = _rdap_resolver().resolve_one("150.171.109.182")
     assert out["asn"] == "8075"
     assert out["asn_descr"] == "MICROSOFT-CORP-MSN-AS-BLOCK, US"
     assert out["country"] == "US"
     assert out["contacts"] == "Microsoft Corporation; Microsoft Abuse Contact"
     assert set(out) == set(RESOLVE_COLUMNS)  # full dict, no missing keys
+    assert _FakeIPWhois.bootstrap_calls == 0  # primary succeeded -> no fallback
 
 
 def test_rdap_lookup_error_returns_empty(monkeypatch):
     monkeypatch.setattr(rdap_mod, "IPWhois", _FakeIPWhois)
     _FakeIPWhois.raise_on = "rdap"
-    r = RdapResolver.__new__(RdapResolver)
-    r._timeout = 10
-    assert r.resolve_one("1.2.3.4") == {c: "" for c in RESOLVE_COLUMNS}
+    # bootstrap disabled -> a failing primary just yields an empty result.
+    assert _rdap_resolver(bootstrap=False).resolve_one("1.2.3.4") == {c: "" for c in RESOLVE_COLUMNS}
+
+
+def test_rdap_bootstrap_fallback_on_empty(monkeypatch):
+    monkeypatch.setattr(rdap_mod, "IPWhois", _FakeIPWhois)
+    _FakeIPWhois.rdap_result = {}  # primary returns nothing usable
+    _FakeIPWhois.rdap_bootstrap_result = {
+        "objects": {"E": {"contact": {"name": "APNIC Hostmaster"}}},
+        "network": {"country": "AU"},
+    }
+    out = _rdap_resolver(bootstrap=True).resolve_one("1.1.1.1")
+    assert _FakeIPWhois.bootstrap_calls == 1
+    assert out["country"] == "AU"  # from network.country (asn_country_code empty)
+    assert out["contacts"] == "APNIC Hostmaster"
+
+
+def test_rdap_bootstrap_fallback_on_error(monkeypatch):
+    monkeypatch.setattr(rdap_mod, "IPWhois", _FakeIPWhois)
+    _FakeIPWhois.raise_on = "rdap_primary"  # primary raises, bootstrap still works
+    _FakeIPWhois.rdap_bootstrap_result = {"asn": "13335", "network": {"country": "US"}}
+    out = _rdap_resolver(bootstrap=True).resolve_one("1.1.1.1")
+    assert _FakeIPWhois.bootstrap_calls == 1
+    assert out["asn"] == "13335"
+    assert out["country"] == "US"
+
+
+def test_rdap_bootstrap_disabled_no_second_call(monkeypatch):
+    monkeypatch.setattr(rdap_mod, "IPWhois", _FakeIPWhois)
+    _FakeIPWhois.rdap_result = {}  # primary empty
+    _FakeIPWhois.rdap_bootstrap_result = {"asn": "13335"}
+    out = _rdap_resolver(bootstrap=False).resolve_one("1.1.1.1")
+    assert _FakeIPWhois.bootstrap_calls == 0  # fallback off -> bootstrap never called
+    assert out == {c: "" for c in RESOLVE_COLUMNS}
+
+
+def test_rdap_country_from_network_when_asn_code_empty(monkeypatch):
+    monkeypatch.setattr(rdap_mod, "IPWhois", _FakeIPWhois)
+    _FakeIPWhois.rdap_result = {"asn": "8075", "asn_country_code": "", "network": {"country": "US"}}
+    out = _rdap_resolver().resolve_one("1.2.3.4")
+    assert out["country"] == "US"
+    assert _FakeIPWhois.bootstrap_calls == 0  # primary had data -> no fallback
 
 
 # --- whois provider ---------------------------------------------------------

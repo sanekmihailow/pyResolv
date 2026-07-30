@@ -94,6 +94,25 @@ def test_src_ip_cidr_defaults_to_empty_list(monkeypatch):
     assert s.graylog.src_ip_cidr == []
 
 
+def test_resolve_workers_defaults_to_three(monkeypatch):
+    _settings_with_env_file(monkeypatch, None)
+    monkeypatch.delenv("RESOLVE__WORKERS", raising=False)
+    assert Settings().resolve.workers == 3
+
+
+def test_resolve_workers_parsed_from_env(monkeypatch):
+    _settings_with_env_file(monkeypatch, None)
+    monkeypatch.setenv("RESOLVE__WORKERS", "7")
+    assert Settings().resolve.workers == 7
+
+
+def test_resolve_workers_rejects_below_one(monkeypatch):
+    _settings_with_env_file(monkeypatch, None)
+    monkeypatch.setenv("RESOLVE__WORKERS", "0")
+    with pytest.raises(ValidationError):
+        Settings()
+
+
 def test_env_example_src_ip_cidr_is_valid():
     """GRAYLOG__SRC_IP_CIDR in .env.example is a JSON array of parseable CIDRs."""
     import json

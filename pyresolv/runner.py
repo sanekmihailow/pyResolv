@@ -36,7 +36,7 @@ from pyresolv.config import Settings, get_settings
 from pyresolv.i18n import _
 from pyresolv.io import open_output
 from pyresolv.resolvers.base import get_resolver
-from pyresolv.schema import DEFAULT_KEY_COLUMN, DEFAULT_RESOLVE_WORKERS
+from pyresolv.schema import DEFAULT_KEY_COLUMN
 from pyresolv.sources.base import get_source
 from pyresolv.stages.aggregate import aggregate_frame, write_split_by_subnet
 from pyresolv.stages.collect import collect_frame
@@ -121,12 +121,7 @@ def _run_aggregate(frame: Optional[pd.DataFrame], p: AggregateParams, s: Setting
 def _run_resolve(frame: Optional[pd.DataFrame], p: ResolveParams, s: Settings) -> pd.DataFrame:
     resolver_name = p.resolver or s.default_resolver
     resolver = get_resolver(resolver_name)
-    if p.workers is not None:
-        max_workers = p.workers
-    elif resolver_name == "gunter" and s.gunter is not None:
-        max_workers = s.gunter.max_workers
-    else:
-        max_workers = DEFAULT_RESOLVE_WORKERS
+    max_workers = p.workers if p.workers is not None else s.resolve.workers
     return resolver.enrich(_require_frame(frame, "resolve"), p.key_column, max_workers)
 
 

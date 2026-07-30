@@ -102,8 +102,14 @@ raising (a failed stage keeps its input); never deletes stdin (`-`/no path) or a
    CIDRs). `SrcIP` is a string field holding a plain dotted-quad IPv4 (no mask), so CIDR filtering is a
    server-side `prefix` query on the octet-aligned prefix (`bool.should` + `minimum_should_match=1`, narrowing
    a /25 to its enclosing /24) plus an **exact client-side `ipaddress` check** in `fetch_window` (pins down
-   finer masks). `--source` picks the source by name (`sources.SOURCES` registry); default comes from
-   `settings.default_source`, then falls back to `"graylog"`.
+   finer masks). When **both** `SRC_IP_LIST` and `SRC_IP_CIDR` are set, they combine per
+   `GRAYLOG__SRC_IP_MATCH_MODE`: **`or`** (default) keeps a `SrcIP` in the list **OR** in a subnet (server-side
+   the two sub-filters are wrapped in one `bool.should`; client-side `_src_ip_allowed` mirrors it); **`and`**
+   requires **both** (sub-filters go straight into `filter`, which ANDs them). With only one of the two set, the
+   mode is irrelevant. (An `and` of a list and a non-overlapping subnet matches nothing — that combination
+   silently returning 0 rows was the original footgun this mode makes explicit.) `--source` picks the source by
+   name (`sources.SOURCES` registry); default comes from `settings.default_source`, then falls back to
+   `"graylog"`.
 2. **trim** — drops `schema.DROP_COLS`, chunked read/write (`schema.DEFAULT_TRIM_CHUNKSIZE`, 10k rows). The
    tqdm progress bar tracks actual bytes consumed from the input file handle (`f.tell()`), not the pandas
    in-memory chunk size — the original script's progress bar was tracking two different units (`total` in file
@@ -132,7 +138,10 @@ raising (a failed stage keeps its input); never deletes stdin (`-`/no path) or a
    `aggregation_10.2.83.0-24__2026-07-23__2026-07-28__time-12-10.csv`). Requires a non-empty `SRC_IP_CIDR`.
 5. **resolve** — `resolvers/base.py` has the generic mechanics (ThreadPoolExecutor, `--workers`, per-key cache,
    `_is_already_enriched` idempotent skip — a row is skipped if `country`/`asn`/`asn_descr`/`contacts` are all
-   already non-empty); each resolver implements only `resolve_one(ip) -> dict`. `--resolver` picks by name
+   already non-empty); each resolver implements only `resolve_one(ip) -> dict`, so the thread pool is shared by
+   **every** resolver (not just `gunter`). The default thread count is the resolver-agnostic `RESOLVE__WORKERS`
+   (`settings.resolve.workers`, default 3), applied in both `pipeline.run_resolve` and `runner._run_resolve`;
+   `--workers`/YAML `workers` overrides it. `--resolver` picks by name
    (`resolvers.RESOLVERS` registry); default from `settings.default_resolver`, then `"default"`. Resolvers:
    **`default`** (`default_chain.py`) runs providers GEO → RDAP → WHOIS, filling each `RESOLVE_COLUMN` from the
    first provider that returns a non-empty value and stopping early once all are filled; **`rdap`**/**`whois`**
@@ -164,9 +173,11 @@ top-level section with all-defaulted fields — `RESOLVE__MMDB_PATH`, `RESOLVE__
 `RESOLVE__WHOIS_TIMEOUT`), so they construct with no `.env` at all.
 
 Source-IP filtering for `collect` uses `GRAYLOG__SRC_IP_LIST` (exact IPs, `terms`) and/or
-`GRAYLOG__SRC_IP_CIDR` (a JSON list of CIDR subnets, e.g. `["10.2.83.0/24"]`). `SRC_IP_CIDR` doubles as the
-bucket definition for `aggregate --out-dir`. It replaced the earlier `SRC_IP_REGEX` (regex patterns) — regex
-can't express arbitrary masks like /25, CIDR can, and `ipaddress` handles the math (`pyresolv/subnets.py`).
+`GRAYLOG__SRC_IP_CIDR` (a JSON list of CIDR subnets, e.g. `["10.2.83.0/24"]`), combined per
+`GRAYLOG__SRC_IP_MATCH_MODE` (`or` default / `and` — see the `collect` stage description). `SRC_IP_CIDR`
+doubles as the bucket definition for `aggregate --out-dir`. It replaced the earlier `SRC_IP_REGEX` (regex
+patterns) — regex can't express arbitrary masks like /25, CIDR can, and `ipaddress` handles the math
+(`pyresolv/subnets.py`).
 
 Historical bug fixed during the migration:
 - `trim`'s tqdm progress bar mismatched units (see stage description above).

@@ -374,6 +374,10 @@ msgstr "Замечание: -o игнорируется, т.к. шаг запи�
 msgid "[rdap][%(ip)s] lookup failed: %(err)s"
 msgstr "[rdap][%(ip)s] ошибка запроса: %(err)s"
 
+#: pyresolv/resolvers/rdap.py
+msgid "[rdap][%(ip)s] bootstrap lookup failed: %(err)s"
+msgstr "[rdap][%(ip)s] ошибка bootstrap-запроса: %(err)s"
+
 #: pyresolv/resolvers/whois.py
 msgid "[whois][%(ip)s] lookup failed: %(err)s"
 msgstr "[whois][%(ip)s] ошибка запроса: %(err)s"

@@ -87,6 +87,13 @@ class Resolver(abc.ABC):
             if col not in df.columns:
                 df[col] = ""
 
+        # Nothing to enrich on an empty frame (e.g. collect returned 0 rows) —
+        # and boolean-indexing a 0-row DataFrame collapses away all columns,
+        # so short-circuit before the mask logic below.
+        if df.empty:
+            print(_("Nothing to enrich, the file is already filled or empty."), file=sys.stderr)
+            return df
+
         if skip_already_enriched:
             already_enriched_mask = df.apply(_is_already_enriched, axis=1)
             rows_to_enrich = df[~already_enriched_mask]

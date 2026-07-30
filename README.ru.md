@@ -118,6 +118,47 @@ cp .env.example .env
 используют соответствующую интеграцию (`collect` -> graylog, `resolve` ->
 gunter). `trim`/`merge`/`aggregate` работают вовсе без `.env`.
 
+Вложенные настройки используют разделитель `__` (`GRAYLOG__URL`, `RESOLVE__RDAP_TIMEOUT`, …).
+Списочные значения (`SRC_IP_LIST`, `SRC_IP_CIDR`) — это JSON-массивы, напр. `["10.2.83.0/24"]`.
+
+**Верхний уровень**
+
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| `DEFAULT_SOURCE` | `graylog` | Источник для `collect`, когда не задан `--source` |
+| `DEFAULT_RESOLVER` | `default` | Резолвер для `resolve`, когда не задан `--resolver` |
+| `MIN_UNIQ_COUNT` | `1` | Значение по умолчанию для `aggregate --min-count` (отбрасывать группы ниже порога; `1` = оставить все) |
+
+**`GRAYLOG__*`** (нужны для `collect`)
+
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| `GRAYLOG__URL` | — *(обязательно)* | Базовый URL OpenSearch/Graylog, напр. `http://localhost:9200` |
+| `GRAYLOG__STREAM_ID` | — *(обязательно)* | ID потока Graylog для фильтрации документов |
+| `GRAYLOG__INDEX` | `device_net` | Имя индекса без суффикса-даты |
+| `GRAYLOG__SEARCH_SIZE` | `5000` | Размер страницы `search_after` |
+| `GRAYLOG__REQUEST_TIMEOUT` | `300` | Таймаут HTTP-запроса к OpenSearch, секунды |
+| `GRAYLOG__SRC_IP_LIST` | `[]` | JSON-массив точных SrcIP (фильтр `terms`) |
+| `GRAYLOG__SRC_IP_CIDR` | `[]` | JSON-массив подсетей-источников в CIDR; также задаёт корзины для `aggregate --out-dir` |
+| `GRAYLOG__SRC_IP_MATCH_MODE` | `or` | Как объединять LIST и CIDR, если заданы оба: `or` (в любом) / `and` (в обоих) |
+
+**`GUNTER__*`** (нужны для `resolve --resolver gunter`)
+
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| `GUNTER__BASE_URL` | — *(обязательно)* | Базовый URL API Gunter |
+| `GUNTER__REQUEST_TIMEOUT` | `30` | Таймаут HTTP-запроса к Gunter, секунды |
+
+**`RESOLVE__*`** (нативные резолверы `default`/`rdap`/`whois`/`geo_maxmind`; все опциональны)
+
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| `RESOLVE__MMDB_PATH` | *(не задано)* | Путь к локальному MaxMind GeoLite2 `.mmdb` для `geo_maxmind`; не задано → geo ничего не даёт |
+| `RESOLVE__RDAP_TIMEOUT` | `10` | Таймаут сокета для резолвера `rdap`, секунды |
+| `RESOLVE__RDAP_BOOTSTRAP` | `true` | При пустом RDAP-ответе повторить через RDAP-bootstrap (только как фолбэк) |
+| `RESOLVE__WHOIS_TIMEOUT` | `15` | Таймаут сокета для резолвера `whois`, секунды |
+| `RESOLVE__WORKERS` | `3` | Число потоков резолвинга по умолчанию для **любого** резолвера (переопределяется `--workers`) |
+
 ## Запуск
 
 ```bash
@@ -138,6 +179,59 @@ pyresolv --type aggregate --streaming --chunk-size 500000 -i trimmed.csv -o aggr
 `python -m pyresolv.cli --type trim ...` или через
 `./.venv/bin/pyresolv ...`.
 
+## Параметры командной строки
+
+**Общие** (для каждой стадии)
+
+| Флаг | По умолчанию | Описание |
+|---|---|---|
+| `--type {collect,trim,merge,aggregate,resolve}` | — *(обязательно)* | Какую стадию запускать |
+| `-i, --input PATH` | stdin | Вход; можно повторять для `merge`; игнорируется для `collect` |
+| `-o, --output PATH` | stdout | Выход |
+| `--delete, --del` | выкл | После успеха удалить входные файлы `-i` (никогда stdin или `-o`) |
+| `--lang {ru,en}` | окружение | Принудительный язык вывода |
+| `--version` | | Показать версию и выйти |
+
+**`collect`**
+
+| Флаг | По умолчанию | Описание |
+|---|---|---|
+| `--source NAME` | `DEFAULT_SOURCE` / `graylog` | Источник данных |
+| `--start N` | `1` | На сколько единиц назад начинается диапазон |
+| `--end N` | `0` | На сколько единиц назад заканчивается диапазон |
+| `--time-unit {d,h}` | `h` | Единица времени (дни / часы) |
+
+**`aggregate`**
+
+| Флаг | По умолчанию | Описание |
+|---|---|---|
+| `--streaming / --no-streaming` | `--streaming` | Потоково (ограниченная память) vs. полная загрузка в память |
+| `--chunk-size N` | `500000` | Размер чанка для `--streaming` |
+| `--min-count N` | `MIN_UNIQ_COUNT` / `1` | Отбрасывать агрегированные группы с count ниже `N` |
+| `--out-dir DIR` | — | Разбить вывод на один CSV на подсеть (взаимоисключимо с `-o`) |
+
+**`resolve`**
+
+| Флаг | По умолчанию | Описание |
+|---|---|---|
+| `--resolver NAME` | `DEFAULT_RESOLVER` / `default` | `default` / `rdap` / `whois` / `geo_maxmind` / `gunter` |
+| `--key-column COL` | `DstIP` | Колонка с IP для резолвинга |
+| `--workers N` | `RESOLVE__WORKERS` / `3` | Число потоков резолвинга |
+
+**`run`** (Вариант B, см. ниже)
+
+| Флаг | По умолчанию | Описание |
+|---|---|---|
+| `--config, -c PATH` | — *(обязательно)* | YAML-конфиг пайплайна |
+| `-i, --input PATH` | stdin | Начальный вход для первого шага |
+| `-o, --output PATH` | stdout | Итоговый вывод |
+
+> **Примечание:** для `run` это *единственные* флаги командной строки. Все
+> параметры **стадий** (`source`, `start`, `min_count`, `out_dir`, `resolver`,
+> `workers`, …) задаются **внутри YAML-конфига** как `имя: {параметр: значение}`,
+> а **не** флагом CLI — передать, например, `--out-dir` в `pyresolv run` нельзя,
+> это ошибка.
+
 ## Единый пайплайн в одном процессе (`pyresolv run`)
 
 Кроме композиции шелл-пайпами (выше, **Вариант A**) есть **Вариант B** —
@@ -151,15 +245,30 @@ pyresolv run --config pipeline.yaml -o out.csv
 ```yaml
 # pipeline.yaml — список шагов. Шаг это либо имя стадии (`trim`),
 # либо отображение «имя: {параметры}».
-- collect: {source: graylog, start: 5, end: 0}
+- collect: {source: graylog, start: 5, end: 0, time_unit: h}
 - trim
 - aggregate: {min_count: 20}
 - resolve: {resolver: gunter}
 ```
 
+**Параметры стадий задаются здесь, в YAML — не флагами CLI.** Параметры каждого
+шага повторяют флаги стадий Варианта A (`--start` → `start` и т.д.):
+
+| Шаг | Параметры в YAML |
+|---|---|
+| `collect` | `source`, `start`, `end`, `time_unit` |
+| `trim` | *(нет)* |
+| `merge` | `inputs` (список путей к CSV) |
+| `aggregate` | `min_count`, `out_dir`, `start`, `end`, `time_unit` |
+| `resolve` | `resolver`, `key_column`, `workers` |
+
+Например, `aggregate --out-dir DIR` из Варианта A здесь превращается в
+`- aggregate: {out_dir: DIR, start: 5, end: 0, time_unit: h}` (нужен заданный
+`GRAYLOG__SRC_IP_CIDR`, а `start`/`end`/`time_unit` формируют временной срез в именах файлов).
+
 - `-i/--input` — начальный вход для первого шага (по умолчанию stdin);
   игнорируется, если первый шаг `collect` (он генерирует данные сам).
-- `-o/--output` — финальный выход (по умолчанию stdout).
+- `-o/--output` — финальный выход (по умолчанию stdout); игнорируется, если шаг записал в `out_dir`.
 - Параметры шагов валидируются строго (`extra="forbid"`): опечатка вроде
   `min_counts` падает с понятной ошибкой **до** запуска, а не в середине.
 - Один общий лог/прогресс: каждый шаг печатает `[i/n] <шаг>` в stderr.

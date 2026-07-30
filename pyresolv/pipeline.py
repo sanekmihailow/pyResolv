@@ -10,22 +10,12 @@ from pathlib import Path
 from pyresolv.config import get_settings
 from pyresolv.i18n import _
 from pyresolv.resolvers.base import get_resolver
-from pyresolv.schema import DEFAULT_RESOLVE_WORKERS
 from pyresolv.sources.base import get_source
 from pyresolv.stages.aggregate import aggregate
 from pyresolv.subnets import parse_cidrs
 from pyresolv.stages.collect import collect
 from pyresolv.stages.merge import merge
 from pyresolv.stages.trim import trim
-
-
-def _resolve_default_workers(resolver_name: str) -> int:
-    """Default number of resolving threads: taken from the integration config
-    if configured (e.g. GUNTER__MAX_WORKERS), otherwise the shared default."""
-    settings = get_settings()
-    if resolver_name == "gunter" and settings.gunter is not None:
-        return settings.gunter.max_workers
-    return DEFAULT_RESOLVE_WORKERS
 
 
 def run_collect(args: argparse.Namespace) -> int:
@@ -86,9 +76,10 @@ def run_aggregate(args: argparse.Namespace) -> int:
 
 
 def run_resolve(args: argparse.Namespace) -> int:
-    resolver_name = args.resolver or get_settings().default_resolver
+    settings = get_settings()
+    resolver_name = args.resolver or settings.default_resolver
     resolver = get_resolver(resolver_name)
-    max_workers = args.workers if args.workers is not None else _resolve_default_workers(resolver_name)
+    max_workers = args.workers if args.workers is not None else settings.resolve.workers
     return resolver.resolve(
         input_path=args.input[0] if args.input else None,
         output_path=args.output,

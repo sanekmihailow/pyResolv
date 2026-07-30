@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-07-30
+
+### Changed
+- Resolver thread count is now unified under `RESOLVE__WORKERS` (default `3`) and applies
+  to **every** resolver (`default`/`rdap`/`whois`/`geo_maxmind`/`gunter`) — the thread pool
+  in `resolvers/base.py` was always shared, but the default worker count used to be
+  gunter-specific. `--workers` / YAML `workers` still override it. **`GUNTER__MAX_WORKERS`
+  is removed**; a leftover value in `.env` is silently ignored — switch to `RESOLVE__WORKERS`.
+
+### Added
+- `RESOLVE__RDAP_BOOTSTRAP` (default `true`): RDAP bootstrap fallback for the `rdap`
+  resolver (and thus the `default` chain). When the primary ASN-based `lookup_rdap`
+  returns nothing (RIR misdetected/unreachable), it retries via the RDAP bootstrap
+  server, which follows referrals to the right RIR without an ASN lookup. The extra
+  request fires only on an empty result. `country` now also falls back to the RDAP
+  network object's own `country` when the ASN country code is absent (as in bootstrap
+  mode).
+
+## [2.3.0] - 2026-07-30
+
+### Added
+- `GRAYLOG__SRC_IP_MATCH_MODE` (`or` default / `and`): controls how `SRC_IP_LIST` and
+  `SRC_IP_CIDR` combine for `collect` when **both** are set. `or` keeps a `SrcIP` in the
+  list **or** in a subnet; `and` requires both. Previously the two were always ANDed,
+  so a list and a non-overlapping subnet silently matched **nothing** — the default is
+  now `or`, and `and` makes the strict behavior explicit.
+- `tools/diagnose_graylog.py`: read-only diagnostic that reruns the exact `collect`
+  OpenSearch query and strips it clause by clause, pinpointing which filter (index /
+  time / stream / field names / SrcIP) is returning 0 rows.
+
+### Fixed
+- `resolve` no longer crashes with `KeyError` on an empty (0-row) input frame — e.g.
+  when `collect` returns 0 rows. Boolean-indexing a 0-row DataFrame dropped all columns;
+  `enrich` now short-circuits an empty frame and passes it through with the resolve
+  columns added.
+
 ## [2.2.0] - 2026-07-24
 
 ### Added

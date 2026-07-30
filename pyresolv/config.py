@@ -24,12 +24,13 @@ not mid-stream.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from pyresolv.i18n import _
+from pyresolv.schema import DEFAULT_RESOLVE_WORKERS
 
 
 class ConfigError(RuntimeError):
@@ -51,12 +52,20 @@ class GraylogSettings(BaseModel):
             "aggregate --out-dir per-subnet buckets. Empty -> collect filter not applied"
         ),
     )
+    src_ip_match_mode: Literal["or", "and"] = Field(
+        default="or",
+        description=(
+            "How to combine SRC_IP_LIST and SRC_IP_CIDR when BOTH are set: 'or' "
+            "(default) keeps a SrcIP that is in the list OR in a subnet; 'and' "
+            "requires it to be in the list AND in a subnet. Irrelevant when only one "
+            "of the two is set."
+        ),
+    )
 
 
 class GunterSettings(BaseModel):
     base_url: str = Field(description="Base URL of the Gunter API")
     request_timeout: int = Field(default=30, description="HTTP request timeout to Gunter, seconds")
-    max_workers: int = Field(default=3, description="Default number of resolving threads")
 
 
 class ResolveSettings(BaseModel):
@@ -68,7 +77,19 @@ class ResolveSettings(BaseModel):
         "Unset -> geo_maxmind yields nothing (country falls back to RDAP/WHOIS codes)",
     )
     rdap_timeout: int = Field(default=10, description="Socket timeout for the rdap resolver, seconds")
+    rdap_bootstrap: bool = Field(
+        default=True,
+        description="rdap resolver: on an empty ASN-based lookup, retry via the RDAP "
+        "bootstrap server (follows referrals to the right RIR without an ASN lookup). "
+        "Fallback only — adds a request solely when the primary lookup returned nothing.",
+    )
     whois_timeout: int = Field(default=15, description="Socket timeout for the whois resolver, seconds")
+    workers: int = Field(
+        default=DEFAULT_RESOLVE_WORKERS,
+        ge=1,
+        description="Default number of resolving threads for ANY resolver "
+        "(--resolver default/rdap/whois/geo_maxmind/gunter). Overridden by --workers.",
+    )
 
 
 class Settings(BaseSettings):

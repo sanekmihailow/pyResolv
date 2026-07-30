@@ -116,6 +116,47 @@ cp .env.example .env
 the corresponding integration (`collect` -> graylog, `resolve` ->
 gunter). `trim`/`merge`/`aggregate` work without `.env` at all.
 
+Nested settings use the `__` delimiter (`GRAYLOG__URL`, `RESOLVE__RDAP_TIMEOUT`, …).
+List values (`SRC_IP_LIST`, `SRC_IP_CIDR`) are JSON arrays, e.g. `["10.2.83.0/24"]`.
+
+**Top-level**
+
+| Variable | Default | Description |
+|---|---|---|
+| `DEFAULT_SOURCE` | `graylog` | Source used by `collect` when `--source` is omitted |
+| `DEFAULT_RESOLVER` | `default` | Resolver used by `resolve` when `--resolver` is omitted |
+| `MIN_UNIQ_COUNT` | `1` | Default for `aggregate --min-count` (drop groups below it; `1` = keep all) |
+
+**`GRAYLOG__*`** (used by `collect`)
+
+| Variable | Default | Description |
+|---|---|---|
+| `GRAYLOG__URL` | — *(required)* | Base OpenSearch/Graylog URL, e.g. `http://localhost:9200` |
+| `GRAYLOG__STREAM_ID` | — *(required)* | Graylog stream ID used to filter documents |
+| `GRAYLOG__INDEX` | `device_net` | Index name without the date suffix |
+| `GRAYLOG__SEARCH_SIZE` | `5000` | `search_after` page size |
+| `GRAYLOG__REQUEST_TIMEOUT` | `300` | HTTP request timeout to OpenSearch, seconds |
+| `GRAYLOG__SRC_IP_LIST` | `[]` | JSON array of exact SrcIPs (`terms` filter) |
+| `GRAYLOG__SRC_IP_CIDR` | `[]` | JSON array of source subnets in CIDR; also defines `aggregate --out-dir` buckets |
+| `GRAYLOG__SRC_IP_MATCH_MODE` | `or` | Combine LIST and CIDR when both set: `or` (in either) / `and` (in both) |
+
+**`GUNTER__*`** (used by `resolve --resolver gunter`)
+
+| Variable | Default | Description |
+|---|---|---|
+| `GUNTER__BASE_URL` | — *(required)* | Base URL of the Gunter API |
+| `GUNTER__REQUEST_TIMEOUT` | `30` | HTTP request timeout to Gunter, seconds |
+
+**`RESOLVE__*`** (native resolvers `default`/`rdap`/`whois`/`geo_maxmind`; all optional)
+
+| Variable | Default | Description |
+|---|---|---|
+| `RESOLVE__MMDB_PATH` | *(unset)* | Path to a local MaxMind GeoLite2 `.mmdb` for `geo_maxmind`; unset → geo yields nothing |
+| `RESOLVE__RDAP_TIMEOUT` | `10` | Socket timeout for the `rdap` resolver, seconds |
+| `RESOLVE__RDAP_BOOTSTRAP` | `true` | On an empty RDAP lookup, retry via the RDAP bootstrap server (fallback only) |
+| `RESOLVE__WHOIS_TIMEOUT` | `15` | Socket timeout for the `whois` resolver, seconds |
+| `RESOLVE__WORKERS` | `3` | Default number of resolving threads for **any** resolver (overridden by `--workers`) |
+
 ## Running
 
 ```bash
@@ -136,6 +177,58 @@ Without installing the package, you can run as a module:
 `python -m pyresolv.cli --type trim ...` or via
 `./.venv/bin/pyresolv ...`.
 
+## Command-line parameters
+
+**Common** (every stage)
+
+| Flag | Default | Description |
+|---|---|---|
+| `--type {collect,trim,merge,aggregate,resolve}` | — *(required)* | Which stage to run |
+| `-i, --input PATH` | stdin | Input; repeatable for `merge`; ignored by `collect` |
+| `-o, --output PATH` | stdout | Output |
+| `--delete, --del` | off | After success, delete the `-i` input file(s) (never stdin or `-o`) |
+| `--lang {ru,en}` | environment | Force output language |
+| `--version` | | Print version and exit |
+
+**`collect`**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--source NAME` | `DEFAULT_SOURCE` / `graylog` | Data source |
+| `--start N` | `1` | How many units back the range starts |
+| `--end N` | `0` | How many units back the range ends |
+| `--time-unit {d,h}` | `h` | Time unit (days / hours) |
+
+**`aggregate`**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--streaming / --no-streaming` | `--streaming` | Chunked (bounded memory) vs. full in-memory load |
+| `--chunk-size N` | `500000` | Chunk size for `--streaming` |
+| `--min-count N` | `MIN_UNIQ_COUNT` / `1` | Drop aggregated groups with count below `N` |
+| `--out-dir DIR` | — | Split output into one CSV per subnet (mutually exclusive with `-o`) |
+
+**`resolve`**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--resolver NAME` | `DEFAULT_RESOLVER` / `default` | `default` / `rdap` / `whois` / `geo_maxmind` / `gunter` |
+| `--key-column COL` | `DstIP` | Column holding the IP to resolve |
+| `--workers N` | `RESOLVE__WORKERS` / `3` | Number of resolving threads |
+
+**`run`** (Variant B, see below)
+
+| Flag | Default | Description |
+|---|---|---|
+| `--config, -c PATH` | — *(required)* | YAML pipeline config |
+| `-i, --input PATH` | stdin | Initial input for the first step |
+| `-o, --output PATH` | stdout | Final output |
+
+> **Note:** for `run` these are the *only* command-line flags. Every **stage**
+> parameter (`source`, `start`, `min_count`, `out_dir`, `resolver`, `workers`, …)
+> is set **inside the YAML config** as `name: {param: value}`, **not** as a CLI
+> flag — passing e.g. `--out-dir` to `pyresolv run` is an error.
+
 ## Single-process pipeline (pyresolv run)
 
 Besides shell-pipe composition (above, **Variant A**), there is **Variant B** —
@@ -150,15 +243,30 @@ pyresolv run --config pipeline.yaml -o out.csv
 ```yaml
 # pipeline.yaml — a list of steps. A step is either a stage name (`trim`),
 # or a mapping "name: {params}".
-- collect: {source: graylog, start: 5, end: 0}
+- collect: {source: graylog, start: 5, end: 0, time_unit: h}
 - trim
 - aggregate: {min_count: 20}
 - resolve: {resolver: gunter}
 ```
 
+**Stage parameters are set here, in the YAML — not as CLI flags.** Each step's
+parameters mirror the Variant A stage flags (`--start` → `start`, etc.):
+
+| Step | YAML params |
+|---|---|
+| `collect` | `source`, `start`, `end`, `time_unit` |
+| `trim` | *(none)* |
+| `merge` | `inputs` (list of CSV paths) |
+| `aggregate` | `min_count`, `out_dir`, `start`, `end`, `time_unit` |
+| `resolve` | `resolver`, `key_column`, `workers` |
+
+For example, `aggregate --out-dir DIR` from Variant A becomes
+`- aggregate: {out_dir: DIR, start: 5, end: 0, time_unit: h}` here (it needs
+`GRAYLOG__SRC_IP_CIDR` set, and `start`/`end`/`time_unit` feed the filenames' time slice).
+
 - `-i/--input` — initial input for the first step (default stdin);
   ignored if the first step is `collect` (it generates data itself).
-- `-o/--output` — final output (default stdout).
+- `-o/--output` — final output (default stdout); ignored when a step wrote to `out_dir`.
 - Step parameters are strictly validated (`extra="forbid"`): a typo like
   `min_counts` fails with a clear error **before** execution, not in the middle.
 - One shared log/progress: each step prints `[i/n] <step>` to stderr.

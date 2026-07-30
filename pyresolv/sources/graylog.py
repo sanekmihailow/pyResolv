@@ -26,6 +26,20 @@ class GraylogSource(Source):
         # pre-filter and the exact client-side membership check below.
         self._networks = parse_cidrs(self._settings.src_ip_cidr)
 
+    def _src_ip_allowed(self, src_ip_str: str, src_ip_obj) -> bool:
+        """Exact client-side counterpart of the server-side SrcIP filter, combining
+        the SRC_IP_LIST allowlist and the SRC_IP_CIDR subnets per SRC_IP_MATCH_MODE.
+        No filter configured -> everything is allowed."""
+        s = self._settings
+        checks = []
+        if s.src_ip_list:
+            checks.append(src_ip_str in s.src_ip_list)
+        if self._networks:
+            checks.append(any(src_ip_obj in net for net in self._networks))
+        if not checks:
+            return True
+        return all(checks) if s.src_ip_match_mode == "and" else any(checks)
+
     def _build_payload(self, time_gte: str, time_lt: str, search_after: Optional[list] = None) -> dict:
         s = self._settings
         payload = {
@@ -55,20 +69,17 @@ class GraylogSource(Source):
             ],
         }
 
+        # Two optional SrcIP sub-filters: an exact allowlist (SRC_IP_LIST -> terms)
+        # and a subnet filter (SRC_IP_CIDR). SrcIP is a STRING field holding a plain
+        # dotted-quad IPv4 (no mask), so a CIDR term query does not apply — we narrow
+        # server-side with a `prefix` query on the octet-aligned prefix of each subnet
+        # (10.2.83.0/25 -> "10.2.83.", i.e. the enclosing /24), OR-combined; the exact
+        # mask is enforced client-side in fetch_window.
+        src_ip_clauses = []
         if s.src_ip_list:
-            payload["query"]["bool"]["filter"].append({
-                "terms": {
-                    "SrcIP": s.src_ip_list,
-                }
-            })
-
+            src_ip_clauses.append({"terms": {"SrcIP": s.src_ip_list}})
         if self._networks:
-            # SrcIP is a STRING field holding a plain dotted-quad IPv4 (no mask),
-            # so a CIDR term query does not apply. We narrow server-side with a
-            # `prefix` query on the octet-aligned prefix of each subnet
-            # (10.2.83.0/25 -> "10.2.83.", i.e. the enclosing /24), OR-combined;
-            # the exact mask is enforced client-side in fetch_window.
-            payload["query"]["bool"]["filter"].append({
+            src_ip_clauses.append({
                 "bool": {
                     "should": [
                         {"prefix": {"SrcIP": octet_prefix(net)}}
@@ -77,6 +88,17 @@ class GraylogSource(Source):
                     "minimum_should_match": 1,
                 }
             })
+
+        if src_ip_clauses:
+            # With one sub-filter (or SRC_IP_MATCH_MODE=and) the clauses go straight
+            # into `filter`, which ANDs them. With both and mode=or (the default),
+            # wrap them in a single bool.should so a SrcIP matching EITHER passes.
+            if len(src_ip_clauses) == 1 or s.src_ip_match_mode == "and":
+                payload["query"]["bool"]["filter"].extend(src_ip_clauses)
+            else:
+                payload["query"]["bool"]["filter"].append({
+                    "bool": {"should": src_ip_clauses, "minimum_should_match": 1}
+                })
 
         if search_after is not None:
             payload["search_after"] = search_after
@@ -128,10 +150,11 @@ class GraylogSource(Source):
                         continue
                     if dst_ip_obj.is_private:
                         continue
-                    # Exact CIDR match: the server-side `prefix` filter only
-                    # narrows to the enclosing /24, so pin down the precise mask
-                    # (e.g. /25) here. No CIDRs configured -> no extra filtering.
-                    if self._networks and not any(src_ip_obj in net for net in self._networks):
+                    # Exact SrcIP check mirroring the server-side filter: the
+                    # `prefix` query only narrows to the enclosing /24, so the
+                    # precise mask (e.g. /25) is pinned down here, combined with
+                    # the allowlist per SRC_IP_MATCH_MODE.
+                    if not self._src_ip_allowed(src_ip_str, src_ip_obj):
                         continue
 
                     yield {col: source.get(col) for col in COLLECT_COLUMNS}
