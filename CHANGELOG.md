@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-08-03
+
+### Fixed
+- The resolve cache no longer crashes the run when its backend cannot be initialized
+  (e.g. a read-only `RESOLVE__CACHE_PATH`, or the `redis` package missing): `get_cache`
+  now logs a warning and falls back to no caching. Caching is an optimization and must
+  never take down a pipeline.
+
 ## [2.6.0] - 2026-08-03
 
 ### Added

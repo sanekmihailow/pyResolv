@@ -186,9 +186,21 @@ class RedisCache(Cache):
 
 
 def get_cache(name: str, settings) -> Cache:
-    """Build the cache backend named by RESOLVE__CACHE from resolve settings."""
+    """Build the cache backend named by RESOLVE__CACHE from resolve settings.
+
+    Caching is an optimization, so a backend that cannot be initialized (e.g. a
+    read-only cache path, or the redis package missing) must NOT crash the run:
+    log a warning and fall back to NullCache (no caching)."""
     if name == "none":
         return NullCache()
-    if name == "redis":
-        return RedisCache(settings.redis_url, settings.redis_prefix)
-    return SqliteCache(settings.cache_path)
+    try:
+        if name == "redis":
+            return RedisCache(settings.redis_url, settings.redis_prefix)
+        return SqliteCache(settings.cache_path)
+    except Exception as e:
+        print(
+            _("Cache disabled (%(backend)s backend unavailable): %(err)s")
+            % {"backend": name, "err": e},
+            file=sys.stderr,
+        )
+        return NullCache()

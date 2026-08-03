@@ -73,6 +73,16 @@ def test_null_cache_is_noop():
     assert c.get("k") is None
 
 
+def test_get_cache_degrades_to_null_on_unwritable_path(capsys):
+    from types import SimpleNamespace
+    from pyresolv.resolvers.cache import get_cache
+    # os.makedirs under an existing non-directory raises -> must NOT crash.
+    s = SimpleNamespace(cache_path="/dev/null/nope/cache.sqlite")
+    cache = get_cache("default", s)
+    assert isinstance(cache, NullCache)
+    assert "Cache disabled" in capsys.readouterr().err
+
+
 # --- RedisCache (fake client) -----------------------------------------------
 
 def test_redis_cache_set_get(monkeypatch):

@@ -399,6 +399,10 @@ msgid "Cache: %(hits)d hits, %(misses)d misses"
 msgstr "Кэш: попаданий %(hits)d, промахов %(misses)d"
 
 #: pyresolv/resolvers/cache.py
+msgid "Cache disabled (%(backend)s backend unavailable): %(err)s"
+msgstr "Кэш отключён (backend %(backend)s недоступен): %(err)s"
+
+#: pyresolv/resolvers/cache.py
 msgid "Cache read error: %(err)s"
 msgstr "Ошибка чтения кэша: %(err)s"
 
