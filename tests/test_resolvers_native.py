@@ -53,11 +53,23 @@ def _reset_fake():
     yield
 
 
-def _rdap_resolver(bootstrap=False):
+def _rdap_resolver(bootstrap=False, rdapss=False):
     r = RdapResolver.__new__(RdapResolver)
     r._timeout = 10
     r._bootstrap = bootstrap
+    r._rdapss = rdapss
+    r._rdapss_url = "https://rdap.ss/api/query?q=" if rdapss else ""
+    r._rdapss_timeout = 15
     return r
+
+
+def _whois_resolver(tcinet=False):
+    w = WhoisResolver.__new__(WhoisResolver)
+    w._timeout = 15
+    w._tcinet = tcinet
+    w._tcinet_host = "whois.tcinet.ru"
+    w._tcinet_timeout = 15
+    return w
 
 
 RDAP_RESULT = {
@@ -83,7 +95,7 @@ def test_rdap_maps_all_fields(monkeypatch):
     assert out["asn_descr"] == "MICROSOFT-CORP-MSN-AS-BLOCK, US"
     assert out["country"] == "US"
     assert out["contacts"] == "Microsoft Corporation; Microsoft Abuse Contact"
-    assert set(out) == set(RESOLVE_COLUMNS)  # full dict, no missing keys
+    assert set(RESOLVE_COLUMNS) <= set(out)  # all columns present (+ optional meta)
     assert _FakeIPWhois.bootstrap_calls == 0  # primary succeeded -> no fallback
 
 
@@ -134,6 +146,98 @@ def test_rdap_country_from_network_when_asn_code_empty(monkeypatch):
     assert _FakeIPWhois.bootstrap_calls == 0  # primary had data -> no fallback
 
 
+# --- rdap.ss aggregator fallback --------------------------------------------
+
+class _FakeResp:
+    def __init__(self, payload):
+        self._payload = payload
+    def raise_for_status(self):
+        pass
+    def json(self):
+        return self._payload
+
+
+class _FakeRequests:
+    def __init__(self, payload=None, exc=None):
+        self.payload = payload
+        self.exc = exc
+        self.calls = 0
+    def get(self, url, timeout=None):
+        self.calls += 1
+        if self.exc:
+            raise self.exc
+        return _FakeResp(self.payload)
+
+
+RDAPSS_PAYLOAD = {
+    "success": True,
+    "data": {
+        "country": "RU",
+        "name": "VK-FRONT",
+        "entities": [
+            {"vcardArray": ["vcard", [["version", {}, "text", "4.0"], ["fn", {}, "text", "VK ADM"]]],
+             "entities": [{"vcardArray": ["vcard", [["fn", {}, "text", "VK NOC"]]]}]},
+            {"vcardArray": ["vcard", [["fn", {}, "text", "VK ADM"]]]},  # dedup
+        ],
+    },
+}
+
+
+def test_contacts_from_rdap_entities_parses_and_dedups():
+    from pyresolv.resolvers._rdap import contacts_from_rdap_entities
+    assert contacts_from_rdap_entities(RDAPSS_PAYLOAD["data"]["entities"]) == "VK ADM; VK NOC"
+
+
+def test_fn_from_vcard_edge_cases():
+    from pyresolv.resolvers._rdap import _fn_from_vcard
+    assert _fn_from_vcard(["vcard", [["fn", {}, "text", "X"]]]) == "X"
+    assert _fn_from_vcard(None) == ""
+    assert _fn_from_vcard(["vcard", []]) == ""
+    assert _fn_from_vcard("nope") == ""
+
+
+def test_rdap_rdapss_fallback_before_bootstrap(monkeypatch):
+    monkeypatch.setattr(rdap_mod, "IPWhois", _FakeIPWhois)
+    _FakeIPWhois.rdap_result = {}  # primary empty
+    _FakeIPWhois.rdap_bootstrap_result = {"network": {"country": "XX"}}
+    fake_req = _FakeRequests(payload=RDAPSS_PAYLOAD)
+    monkeypatch.setattr(rdap_mod, "requests", fake_req)
+    out = _rdap_resolver(bootstrap=True, rdapss=True).resolve_one("95.163.61.56")
+    assert fake_req.calls == 1                 # rdap.ss queried
+    assert _FakeIPWhois.bootstrap_calls == 0   # rdap.ss filled -> bootstrap NOT reached
+    assert out["country"] == "RU"
+    assert out["contacts"] == "VK ADM; VK NOC"
+    assert out["asn"] == ""                    # rdap.ss IP object carries no ASN
+
+
+def test_rdap_rdapss_empty_falls_through_to_bootstrap(monkeypatch):
+    monkeypatch.setattr(rdap_mod, "IPWhois", _FakeIPWhois)
+    _FakeIPWhois.rdap_result = {}
+    _FakeIPWhois.rdap_bootstrap_result = {"network": {"country": "US"}}
+    monkeypatch.setattr(rdap_mod, "requests", _FakeRequests(payload={"success": False}))
+    out = _rdap_resolver(bootstrap=True, rdapss=True).resolve_one("1.1.1.1")
+    assert _FakeIPWhois.bootstrap_calls == 1
+    assert out["country"] == "US"
+
+
+def test_rdap_rdapss_disabled_not_called(monkeypatch):
+    monkeypatch.setattr(rdap_mod, "IPWhois", _FakeIPWhois)
+    _FakeIPWhois.rdap_result = {}
+    fake_req = _FakeRequests(payload=RDAPSS_PAYLOAD)
+    monkeypatch.setattr(rdap_mod, "requests", fake_req)
+    out = _rdap_resolver(bootstrap=False, rdapss=False).resolve_one("1.1.1.1")
+    assert fake_req.calls == 0
+    assert out == {c: "" for c in RESOLVE_COLUMNS}
+
+
+def test_rdap_rdapss_error_returns_empty(monkeypatch):
+    monkeypatch.setattr(rdap_mod, "IPWhois", _FakeIPWhois)
+    _FakeIPWhois.rdap_result = {}
+    monkeypatch.setattr(rdap_mod, "requests", _FakeRequests(exc=RuntimeError("net down")))
+    out = _rdap_resolver(bootstrap=False, rdapss=True).resolve_one("1.1.1.1")
+    assert out == {c: "" for c in RESOLVE_COLUMNS}
+
+
 # --- whois provider ---------------------------------------------------------
 
 def test_whois_maps_fields(monkeypatch):
@@ -146,12 +250,66 @@ def test_whois_maps_fields(monkeypatch):
             {"country": "US", "description": "Microsoft Corporation"},  # dedup
         ],
     }
-    w = WhoisResolver.__new__(WhoisResolver)
-    w._timeout = 15
-    out = w.resolve_one("150.171.109.182")
+    out = _whois_resolver().resolve_one("150.171.109.182")
     assert out["asn"] == "8075"
     assert out["country"] == "US"
     assert out["contacts"] == "Microsoft Corporation"  # first line, deduped
+
+
+# --- whois tcinet fallback --------------------------------------------------
+
+TCINET_RU = """% TCI Whois Server
+domain:        VK.RU
+org:           LLC "V Kontakte"
+registrar:     RUCENTER-RU
+nserver:       ns1.vk.com.
+nserver:       ns2.vk.com.
+state:         REGISTERED, DELEGATED, VERIFIED
+paid-till:     2025-01-01T21:00:00Z
+"""
+
+
+def test_whois_tcinet_fallback_on_empty(monkeypatch):
+    monkeypatch.setattr(whois_mod, "IPWhois", _FakeIPWhois)
+    _FakeIPWhois.whois_result = {}  # ipwhois returns nothing -> tcinet tier
+    w = _whois_resolver(tcinet=True)
+    monkeypatch.setattr(w, "_tcinet_query", lambda q: TCINET_RU)
+    out = w.resolve_one("vk.ru")
+    assert 'LLC "V Kontakte"' in out["contacts"]
+    assert "RUCENTER-RU" in out["contacts"]
+    assert "ns1.vk.com." in out["contacts"]
+    assert out["country"] == "" and out["asn"] == ""  # domain whois has no ASN/country
+
+
+def test_whois_tcinet_skips_non_tci_zone(monkeypatch):
+    monkeypatch.setattr(whois_mod, "IPWhois", _FakeIPWhois)
+    _FakeIPWhois.whois_result = {}
+    w = _whois_resolver(tcinet=True)
+    calls = {"n": 0}
+    monkeypatch.setattr(w, "_tcinet_query", lambda q: calls.__setitem__("n", calls["n"] + 1) or "")
+    out = w.resolve_one("example.com")  # not a TCI zone -> no network call
+    assert calls["n"] == 0
+    assert out == {c: "" for c in RESOLVE_COLUMNS}
+
+
+def test_whois_tcinet_punycodes_idn(monkeypatch):
+    monkeypatch.setattr(whois_mod, "IPWhois", _FakeIPWhois)
+    _FakeIPWhois.whois_result = {}
+    w = _whois_resolver(tcinet=True)
+    seen = {}
+    monkeypatch.setattr(w, "_tcinet_query", lambda q: seen.__setitem__("q", q) or "org: t\n")
+    w.resolve_one("пример.рф")
+    assert seen["q"] == "пример.рф".encode("idna").decode("ascii")
+
+
+def test_whois_tcinet_disabled_not_called(monkeypatch):
+    monkeypatch.setattr(whois_mod, "IPWhois", _FakeIPWhois)
+    _FakeIPWhois.whois_result = {}
+    w = _whois_resolver(tcinet=False)
+    calls = {"n": 0}
+    monkeypatch.setattr(w, "_tcinet_query", lambda q: calls.__setitem__("n", calls["n"] + 1) or "")
+    w.resolve_one("vk.ru")
+    assert calls["n"] == 0
 
 
 # --- geo_maxmind provider ---------------------------------------------------

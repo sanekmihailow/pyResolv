@@ -68,7 +68,7 @@ class _RecWorkersResolver(Resolver):
     def resolve_one(self, key):
         return self._empty_result()
 
-    def enrich(self, df, key_column, max_workers, skip_already_enriched=True):
+    def enrich(self, df, key_column, max_workers, skip_already_enriched=True, cache=None):
         type(self).last_workers = max_workers
         return df
 
@@ -137,7 +137,7 @@ def test_collect_trim_aggregate(tmp_path):
 
 def test_resolve_enriches(tmp_path, raw_csv):
     _FakeResolver.calls = 0
-    cfg = _write(tmp_path, "- trim\n- aggregate\n- resolve: {resolver: fake_res, workers: 2}\n")
+    cfg = _write(tmp_path, "- trim\n- aggregate\n- resolve: {resolver: fake_res, workers: 2, cache: false}\n")
     out = tmp_path / "o.csv"
     run_pipeline(cfg, input_path=str(raw_csv), output_path=str(out))
     text = out.read_text(encoding="utf-8")
@@ -153,14 +153,15 @@ def test_runner_resolve_default_workers_from_resolve_settings():
     # No `workers` param -> default comes from settings.resolve.workers, for any resolver.
     _RecWorkersResolver.last_workers = None
     s = SimpleNamespace(default_resolver="rec_workers", resolve=SimpleNamespace(workers=5))
-    _run_resolve(pd.DataFrame({"DstIP": ["8.8.8.8"]}), ResolveParams(resolver="rec_workers"), s)
+    _run_resolve(pd.DataFrame({"DstIP": ["8.8.8.8"]}), ResolveParams(resolver="rec_workers", cache=False), s)
     assert _RecWorkersResolver.last_workers == 5
 
 
 def test_runner_resolve_workers_param_overrides():
     _RecWorkersResolver.last_workers = None
     s = SimpleNamespace(default_resolver="rec_workers", resolve=SimpleNamespace(workers=5))
-    _run_resolve(pd.DataFrame({"DstIP": ["8.8.8.8"]}), ResolveParams(resolver="rec_workers", workers=9), s)
+    _run_resolve(pd.DataFrame({"DstIP": ["8.8.8.8"]}),
+                 ResolveParams(resolver="rec_workers", workers=9, cache=False), s)
     assert _RecWorkersResolver.last_workers == 9
 
 
@@ -173,7 +174,7 @@ def test_pipeline_resolve_default_workers_from_resolve_settings(monkeypatch, tmp
     inp = tmp_path / "in.csv"
     inp.write_text("DstIP,country,asn,asn_descr,contacts\n8.8.8.8,,,,\n", encoding="utf-8")
     args = SimpleNamespace(resolver=None, workers=None, input=[str(inp)],
-                           output=str(tmp_path / "o.csv"), key_column="DstIP")
+                           output=str(tmp_path / "o.csv"), key_column="DstIP", cache=False)
     pipeline.run_resolve(args)
     assert _RecWorkersResolver.last_workers == 6
 

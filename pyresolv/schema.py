@@ -35,6 +35,11 @@ SORT_CANDIDATES = ["count", "ac_action", "SrcIP", "DstIP", "DstPort"]
 # (DstIP by default).
 RESOLVE_COLUMNS = ["country", "asn", "asn_descr", "contacts"]
 
+# Bumped when the shape/meaning of RESOLVE_COLUMNS changes, so a persistent
+# resolve cache from an older schema is not served to a newer one (it is part
+# of the cache key namespace — see resolvers/cache.py).
+RESOLVE_SCHEMA_VERSION = "v1"
+
 DEFAULT_KEY_COLUMN = "DstIP"
 
 DEFAULT_TRIM_CHUNKSIZE = 10_000

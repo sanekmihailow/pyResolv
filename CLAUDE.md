@@ -136,16 +136,30 @@ raising (a failed stage keeps its input); never deletes stdin (`-`/no path) or a
    so the stage stays config-decoupled), unmatched rows go to an `other` file, and filenames carry the time slice
    from `--start`/`--end`/`--time-unit` (`pyresolv/subnets.py::slice_filename`, e.g.
    `aggregation_10.2.83.0-24__2026-07-23__2026-07-28__time-12-10.csv`). Requires a non-empty `SRC_IP_CIDR`.
-5. **resolve** — `resolvers/base.py` has the generic mechanics (ThreadPoolExecutor, `--workers`, per-key cache,
-   `_is_already_enriched` idempotent skip — a row is skipped if `country`/`asn`/`asn_descr`/`contacts` are all
-   already non-empty); each resolver implements only `resolve_one(ip) -> dict`, so the thread pool is shared by
-   **every** resolver (not just `gunter`). The default thread count is the resolver-agnostic `RESOLVE__WORKERS`
+5. **resolve** — `resolvers/base.py` has the generic mechanics (ThreadPoolExecutor, `--workers`, a **persistent
+   cross-run cache**, `_is_already_enriched` idempotent skip — a row is skipped if `country`/`asn`/`asn_descr`/
+   `contacts` are all already non-empty); each resolver implements only `resolve_one(ip) -> dict`, so both the
+   thread pool and the cache are shared by **every** resolver (not just `gunter`). The persistent cache
+   (`resolvers/cache.py`) is checked in `enrich` before the thread pool: keys found in cache skip the network,
+   misses are resolved then stored. Key is namespaced `resolver_name:RESOLVE_SCHEMA_VERSION:key`; the entry's
+   TTL comes from `compute_cache_expiry` — the resolver's optional `expires` hint (RDAP `expiration` event /
+   tcinet `paid-till`, returned by `resolve_one` as a meta key, never written to the CSV) **+1 day**, else the
+   1st of next month; **empty/failed results are not cached** (so a transient outage can't poison it). Backend
+   from `RESOLVE__CACHE` (`default` = SQLite file `RESOLVE__CACHE_PATH`; `redis` = shared, native `EXPIREAT`,
+   optional `.[redis]` extra; `none`); the `--cache/--no-cache` flag (YAML `cache: true/false`) toggles it per
+   run, backend errors are non-fatal (log + behave as miss/no-store). The default thread count is the resolver-agnostic `RESOLVE__WORKERS`
    (`settings.resolve.workers`, default 3), applied in both `pipeline.run_resolve` and `runner._run_resolve`;
    `--workers`/YAML `workers` overrides it. `--resolver` picks by name
    (`resolvers.RESOLVERS` registry); default from `settings.default_resolver`, then `"default"`. Resolvers:
    **`default`** (`default_chain.py`) runs providers GEO → RDAP → WHOIS, filling each `RESOLVE_COLUMN` from the
    first provider that returns a non-empty value and stopping early once all are filled; **`rdap`**/**`whois`**
-   do ASN/description/contacts/country via `ipwhois` (`lookup_rdap` / `lookup_whois`); **`geo_maxmind`** reads
+   do ASN/description/contacts/country via `ipwhois` (`lookup_rdap` / `lookup_whois`). Each has an internal
+   fallback cascade, each tier firing only when the previous returned nothing: **`rdap`** = direct RIR RDAP →
+   **rdap.ss** aggregator (`RESOLVE__RDAPSS`, HTTP `rdap.ss/api/query?q=`, fills country+contacts from the raw
+   RFC7483 `entities`/vcardArray — no ASN) → RDAP **bootstrap** (`RESOLVE__RDAP_BOOTSTRAP`); **`whois`** = ipwhois
+   port-43 whois → **tcinet** (`RESOLVE__TCINET`, `whois.tcinet.ru:43`, domain whois for .ru/.su/.рф — keyed by
+   `url_domain`, no-op for an IP key, punycode for IDN). Via the `default` chain (rdap before whois) these tiers
+   form one linear cascade. **`geo_maxmind`** reads
    country from a local MaxMind `.mmdb` via `geoip2` (optional extra — no path/lib → yields nothing);
    **`gunter`** still calls the external HTTP service. Providers return a full `_empty_result()`-padded dict
    (so partial fills are safe with `base.enrich`), never raise (log + return partial), and read timeouts/mmdb

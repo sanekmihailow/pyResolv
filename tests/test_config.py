@@ -113,6 +113,54 @@ def test_resolve_workers_rejects_below_one(monkeypatch):
         Settings()
 
 
+def test_resolve_rdapss_tcinet_defaults(monkeypatch):
+    _settings_with_env_file(monkeypatch, None)
+    for k in ("RESOLVE__RDAPSS", "RESOLVE__TCINET"):
+        monkeypatch.delenv(k, raising=False)
+    r = Settings().resolve
+    assert r.rdapss is True                              # rdap.ss fallback on by default
+    assert r.rdapss_url == "https://rdap.ss/api/query?q="
+    assert r.tcinet is False                             # tcinet opt-in
+    assert r.tcinet_host == "whois.tcinet.ru"
+
+
+def test_resolve_rdapss_tcinet_parsed_from_env(monkeypatch):
+    _settings_with_env_file(monkeypatch, None)
+    monkeypatch.setenv("RESOLVE__RDAPSS", "false")
+    monkeypatch.setenv("RESOLVE__TCINET", "true")
+    monkeypatch.setenv("RESOLVE__TCINET_HOST", "whois.example.ru")
+    r = Settings().resolve
+    assert r.rdapss is False
+    assert r.tcinet is True
+    assert r.tcinet_host == "whois.example.ru"
+
+
+def test_resolve_cache_defaults(monkeypatch):
+    _settings_with_env_file(monkeypatch, None)
+    for k in ("RESOLVE__CACHE", "RESOLVE__CACHE_PATH", "RESOLVE__REDIS_URL"):
+        monkeypatch.delenv(k, raising=False)
+    r = Settings().resolve
+    assert r.cache == "default"
+    assert r.cache_path.endswith("resolve-cache.sqlite")
+    assert r.redis_url == "redis://localhost:6379/0"
+
+
+def test_resolve_cache_parsed_from_env(monkeypatch):
+    _settings_with_env_file(monkeypatch, None)
+    monkeypatch.setenv("RESOLVE__CACHE", "redis")
+    monkeypatch.setenv("RESOLVE__REDIS_URL", "redis://cache:6380/1")
+    r = Settings().resolve
+    assert r.cache == "redis"
+    assert r.redis_url == "redis://cache:6380/1"
+
+
+def test_resolve_cache_rejects_unknown_backend(monkeypatch):
+    _settings_with_env_file(monkeypatch, None)
+    monkeypatch.setenv("RESOLVE__CACHE", "memcached")
+    with pytest.raises(ValidationError):
+        Settings()
+
+
 def test_env_example_src_ip_cidr_is_valid():
     """GRAYLOG__SRC_IP_CIDR in .env.example is a JSON array of parseable CIDRs."""
     import json

@@ -1,5 +1,6 @@
-.venv/
 .md/
+.venv/
+.temp/
 .pytest_cache/
 __pycache__/
 *.pyc

@@ -18,7 +18,8 @@ from tqdm import tqdm
 
 from pyresolv.i18n import _
 from pyresolv.io import open_input, open_output
-from pyresolv.schema import PANDAS_READ_KWARGS, RESOLVE_COLUMNS
+from pyresolv.resolvers.cache import Cache, NullCache, compute_cache_expiry
+from pyresolv.schema import PANDAS_READ_KWARGS, RESOLVE_COLUMNS, RESOLVE_SCHEMA_VERSION
 
 RESOLVERS: Dict[str, Type["Resolver"]] = {}
 
@@ -66,17 +67,25 @@ class Resolver(abc.ABC):
     def _empty_result(self) -> dict:
         return {col: "" for col in RESOLVE_COLUMNS}
 
+    def _cache_key(self, key: str) -> str:
+        """Namespace the cache key by resolver name + schema version so distinct
+        resolvers / schema revisions never serve each other's cached results."""
+        return f"{self.name}:{RESOLVE_SCHEMA_VERSION}:{key}"
+
     def enrich(
         self,
         df: pd.DataFrame,
         key_column: str,
         max_workers: int,
         skip_already_enriched: bool = True,
+        cache: Optional[Cache] = None,
     ) -> pd.DataFrame:
         """Enrich an in-memory DataFrame in place (adds/fills RESOLVE_COLUMNS)
         and return it. This is the shared core used both by the path-based
         `resolve` (read -> enrich -> write) and by the single-process pipeline
         engine (Variant B), which passes the running frame directly."""
+        if cache is None:
+            cache = NullCache()
         if max_workers < 1:
             raise ValueError(_("max_workers must be >= 1"))
 
@@ -117,33 +126,57 @@ class Resolver(abc.ABC):
         if not keys_to_enrich:
             print(_("Nothing to enrich, the file is already filled or empty."), file=sys.stderr)
         else:
-            cache: Dict[str, dict] = {}
+            results: Dict[str, dict] = {}
+            misses: List[str] = []
+            for key in keys_to_enrich:
+                cached = cache.get(self._cache_key(key))
+                if cached is not None:
+                    results[key] = cached
+                else:
+                    misses.append(key)
 
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_key = {executor.submit(self.resolve_one, k): k for k in keys_to_enrich}
+            print(
+                _("Cache: %(hits)d hits, %(misses)d misses")
+                % {"hits": len(keys_to_enrich) - len(misses), "misses": len(misses)},
+                file=sys.stderr,
+            )
 
-                for future in tqdm(
-                    as_completed(future_to_key),
-                    total=len(future_to_key),
-                    desc=_("Resolving via %(name)s") % {"name": self.name},
-                ):
-                    key = future_to_key[future]
-                    try:
-                        cache[key] = future.result()
-                    except Exception as e:
-                        print(
-                            _("[%(name)s][%(key)s] unexpected error: %(err)s")
-                            % {"name": self.name, "key": key, "err": e},
-                            file=sys.stderr,
-                        )
-                        cache[key] = self._empty_result()
+            if misses:
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    future_to_key = {executor.submit(self.resolve_one, k): k for k in misses}
 
-            mask = normalized_key_series.isin(cache.keys())
+                    for future in tqdm(
+                        as_completed(future_to_key),
+                        total=len(future_to_key),
+                        desc=_("Resolving via %(name)s") % {"name": self.name},
+                    ):
+                        key = future_to_key[future]
+                        try:
+                            result = future.result()
+                        except Exception as e:
+                            print(
+                                _("[%(name)s][%(key)s] unexpected error: %(err)s")
+                                % {"name": self.name, "key": key, "err": e},
+                                file=sys.stderr,
+                            )
+                            result = self._empty_result()
+                        results[key] = result
+                        # Cache only non-empty results (a transient failure must
+                        # not poison the cache). Expiry from the resolver's
+                        # `expires` hint, else the 1st of next month.
+                        if any(result.get(col) for col in RESOLVE_COLUMNS):
+                            cache.set(
+                                self._cache_key(key),
+                                {col: result.get(col, "") for col in RESOLVE_COLUMNS},
+                                compute_cache_expiry(result.get("expires")),
+                            )
+
+            mask = normalized_key_series.isin(results.keys())
             if already_enriched_mask is not None:
                 mask &= ~already_enriched_mask
 
             for col in RESOLVE_COLUMNS:
-                df.loc[mask, col] = normalized_key_series[mask].map(lambda k: cache[k][col])
+                df.loc[mask, col] = normalized_key_series[mask].map(lambda k: results[k][col])
 
         return df
 
@@ -154,11 +187,12 @@ class Resolver(abc.ABC):
         key_column: str,
         max_workers: int,
         skip_already_enriched: bool = True,
+        cache: Optional[Cache] = None,
     ) -> int:
         with open_input(input_path) as in_f:
             df = pd.read_csv(in_f, **PANDAS_READ_KWARGS)
 
-        df = self.enrich(df, key_column, max_workers, skip_already_enriched)
+        df = self.enrich(df, key_column, max_workers, skip_already_enriched, cache=cache)
 
         with open_output(output_path) as out_f:
             df.to_csv(out_f, index=False)

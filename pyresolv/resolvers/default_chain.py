@@ -44,4 +44,7 @@ class DefaultResolver(Resolver):
             for col in RESOLVE_COLUMNS:
                 if not result[col] and partial.get(col):
                     result[col] = partial[col]
+            # Cache-TTL hint: keep the first provider's expiry (not a RESOLVE_COLUMN).
+            if not result.get("expires") and partial.get("expires"):
+                result["expires"] = partial["expires"]
         return result

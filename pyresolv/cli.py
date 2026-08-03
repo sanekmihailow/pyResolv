@@ -173,6 +173,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=_("Number of resolving threads (default: from the resolver config)"),
     )
+    resolve_group.add_argument(
+        "--cache",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=_(
+            "Use the persistent resolve cache (default). The backend is chosen by "
+            "RESOLVE__CACHE in .env (default/redis/none); --no-cache disables caching "
+            "for this run."
+        ),
+    )
 
     return parser
 

@@ -36,6 +36,7 @@ from pyresolv.config import Settings, get_settings
 from pyresolv.i18n import _
 from pyresolv.io import open_output
 from pyresolv.resolvers.base import get_resolver
+from pyresolv.resolvers.cache import NullCache, get_cache
 from pyresolv.schema import DEFAULT_KEY_COLUMN
 from pyresolv.sources.base import get_source
 from pyresolv.stages.aggregate import aggregate_frame, write_split_by_subnet
@@ -81,6 +82,7 @@ class ResolveParams(_StepParams):
     resolver: Optional[str] = None
     key_column: str = DEFAULT_KEY_COLUMN
     workers: Optional[int] = None
+    cache: bool = True
 
 
 def _run_collect(frame: Optional[pd.DataFrame], p: CollectParams, s: Settings) -> pd.DataFrame:
@@ -122,7 +124,8 @@ def _run_resolve(frame: Optional[pd.DataFrame], p: ResolveParams, s: Settings) -
     resolver_name = p.resolver or s.default_resolver
     resolver = get_resolver(resolver_name)
     max_workers = p.workers if p.workers is not None else s.resolve.workers
-    return resolver.enrich(_require_frame(frame, "resolve"), p.key_column, max_workers)
+    cache = get_cache(s.resolve.cache, s.resolve) if p.cache else NullCache()
+    return resolver.enrich(_require_frame(frame, "resolve"), p.key_column, max_workers, cache=cache)
 
 
 # name -> (params model, runner). Also the source of truth for valid step names.

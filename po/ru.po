@@ -378,13 +378,41 @@ msgstr "[rdap][%(ip)s] ошибка запроса: %(err)s"
 msgid "[rdap][%(ip)s] bootstrap lookup failed: %(err)s"
 msgstr "[rdap][%(ip)s] ошибка bootstrap-запроса: %(err)s"
 
+#: pyresolv/resolvers/rdap.py
+msgid "[rdap][%(ip)s] rdap.ss lookup failed: %(err)s"
+msgstr "[rdap][%(ip)s] ошибка запроса rdap.ss: %(err)s"
+
 #: pyresolv/resolvers/whois.py
 msgid "[whois][%(ip)s] lookup failed: %(err)s"
 msgstr "[whois][%(ip)s] ошибка запроса: %(err)s"
 
+#: pyresolv/resolvers/whois.py
+msgid "[whois][%(key)s] tcinet lookup failed: %(err)s"
+msgstr "[whois][%(key)s] ошибка запроса tcinet: %(err)s"
+
 #: pyresolv/resolvers/geo_maxmind.py
 msgid "geo_maxmind disabled (geoip2/mmdb unavailable): %(err)s"
 msgstr "geo_maxmind отключён (geoip2/mmdb недоступны): %(err)s"
+
+#: pyresolv/resolvers/base.py
+msgid "Cache: %(hits)d hits, %(misses)d misses"
+msgstr "Кэш: попаданий %(hits)d, промахов %(misses)d"
+
+#: pyresolv/resolvers/cache.py
+msgid "Cache read error: %(err)s"
+msgstr "Ошибка чтения кэша: %(err)s"
+
+#: pyresolv/resolvers/cache.py
+msgid "Cache write error: %(err)s"
+msgstr "Ошибка записи кэша: %(err)s"
+
+#: pyresolv/resolvers/cache.py
+msgid ""
+"The 'redis' package is required for RESOLVE__CACHE=redis. Install it: pip "
+"install -e '.[redis]'"
+msgstr ""
+"Для RESOLVE__CACHE=redis нужен пакет 'redis'. Установите: pip install -e "
+"'.[redis]'"
 
 #: pyresolv/resolvers/geo_maxmind.py
 msgid "[geo_maxmind][%(ip)s] lookup failed: %(err)s"

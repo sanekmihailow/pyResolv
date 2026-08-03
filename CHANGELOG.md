@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-08-03
+
+### Added
+- Persistent cross-run **resolve cache** (`resolvers/cache.py`), shared by every resolver via
+  `base.enrich`. Keys found in cache skip the network. Entry TTL = the resolved expiry date
+  (RDAP `expiration` event / tcinet `paid-till`) **+1 day**, or the 1st of next month when no
+  date is available; empty/failed results are not cached. Backends via `RESOLVE__CACHE`:
+  `default` (local SQLite file `RESOLVE__CACHE_PATH`), `redis` (shared, native TTL, optional
+  `.[redis]` extra — `RESOLVE__REDIS_URL`/`RESOLVE__REDIS_PREFIX`), or `none`. The
+  `--cache`/`--no-cache` flag (YAML `cache: true/false`) toggles caching per run; backend errors
+  are non-fatal. Cache keys are namespaced by resolver name + `RESOLVE_SCHEMA_VERSION`.
+
+## [2.5.0] - 2026-07-30
+
+### Added
+- `rdap` resolver fallback cascade (each tier fires only on an empty previous result): direct RIR
+  RDAP → **rdap.ss** aggregator → RDAP bootstrap. `RESOLVE__RDAPSS` (default `true`),
+  `RESOLVE__RDAPSS_URL`, `RESOLVE__RDAPSS_TIMEOUT`. rdap.ss is a reachable HTTP endpoint that
+  proxies to the right registry (fills country + contacts from the raw RFC 7483 `entities`; an
+  RDAP IP object carries no ASN) — useful when the direct RIR RDAP is unreachable from the host.
+- `whois` resolver fallback: after the ipwhois whois, **tcinet** domain whois (`whois.tcinet.ru:43`)
+  for .ru/.su/.рф. `RESOLVE__TCINET` (default `false`), `RESOLVE__TCINET_HOST`,
+  `RESOLVE__TCINET_TIMEOUT`. Domain-oriented (keyed by `url_domain`, punycode for IDN); a no-op for
+  an IP key. Via the `default` chain (rdap→whois) all tiers form one linear cascade.
+
 ## [2.4.0] - 2026-07-30
 
 ### Changed

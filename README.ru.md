@@ -41,7 +41,12 @@ collect  ->  trim  ->  merge  ->  aggregate  ->  resolve
   провайдер, через `ipwhois`), `geo_maxmind` (страна из локального MaxMind
   `.mmdb` — задать `RESOLVE__MMDB_PATH` и `pip install -e '.[geo]'`) и `gunter`
   (внешний HTTP-сервис). Идемпотентно: уже заполненные строки не резолвятся
-  повторно и не дёргают сеть.
+  повторно и не дёргают сеть. Результаты также кэшируются между прогонами
+  (персистентный кэш, `--cache` включён по умолчанию): каждый уникальный ключ
+  резолвится не чаще одного раза до истечения записи — дата истечения из
+  резолва + 1 день, либо 1-е число следующего месяца, если даты нет (пустые/
+  сбойные ответы не кэшируются). Backend — `RESOLVE__CACHE` (`default` SQLite /
+  `redis` / `none`); `--no-cache` выключает.
 
 Источники и резолверы — плагины, регистрируемые по имени
 (`pyresolv/sources/`, `pyresolv/resolvers/`); чтобы добавить новый источник
@@ -155,9 +160,19 @@ gunter). `trim`/`merge`/`aggregate` работают вовсе без `.env`.
 |---|---|---|
 | `RESOLVE__MMDB_PATH` | *(не задано)* | Путь к локальному MaxMind GeoLite2 `.mmdb` для `geo_maxmind`; не задано → geo ничего не даёт |
 | `RESOLVE__RDAP_TIMEOUT` | `10` | Таймаут сокета для резолвера `rdap`, секунды |
+| `RESOLVE__RDAPSS` | `true` | Фолбэк `rdap`: запрос к агрегатору rdap.ss (перед bootstrap), когда прямой лукап вернул пусто |
+| `RESOLVE__RDAPSS_URL` | `https://rdap.ss/api/query?q=` | URL запроса rdap.ss (пустой тоже отключает фолбэк) |
+| `RESOLVE__RDAPSS_TIMEOUT` | `15` | HTTP-таймаут фолбэка rdap.ss, секунды |
 | `RESOLVE__RDAP_BOOTSTRAP` | `true` | При пустом RDAP-ответе повторить через RDAP-bootstrap (только как фолбэк) |
 | `RESOLVE__WHOIS_TIMEOUT` | `15` | Таймаут сокета для резолвера `whois`, секунды |
+| `RESOLVE__TCINET` | `false` | Фолбэк `whois`: доменный whois ТЦИ (`whois.tcinet.ru:43`) для .ru/.su/.рф — только домены, включать для прогонов с `--key-column url_domain` |
+| `RESOLVE__TCINET_HOST` | `whois.tcinet.ru` | Хост доменного whois ТЦИ (порт 43) |
+| `RESOLVE__TCINET_TIMEOUT` | `15` | Таймаут сокета фолбэка tcinet, секунды |
 | `RESOLVE__WORKERS` | `3` | Число потоков резолвинга по умолчанию для **любого** резолвера (переопределяется `--workers`) |
+| `RESOLVE__CACHE` | `default` | Backend персистентного кэша резолва: `default` (файл SQLite), `redis` или `none` |
+| `RESOLVE__CACHE_PATH` | `~/.cache/pyresolv/resolve-cache.sqlite` | Файл SQLite для backend'а `default` |
+| `RESOLVE__REDIS_URL` | `redis://localhost:6379/0` | URL Redis для backend'а `redis` |
+| `RESOLVE__REDIS_PREFIX` | `pyresolv:resolve:` | Префикс ключей для backend'а `redis` |
 
 ## Запуск
 
@@ -217,6 +232,7 @@ pyresolv --type aggregate --streaming --chunk-size 500000 -i trimmed.csv -o aggr
 | `--resolver NAME` | `DEFAULT_RESOLVER` / `default` | `default` / `rdap` / `whois` / `geo_maxmind` / `gunter` |
 | `--key-column COL` | `DstIP` | Колонка с IP для резолвинга |
 | `--workers N` | `RESOLVE__WORKERS` / `3` | Число потоков резолвинга |
+| `--cache` / `--no-cache` | `--cache` | Использовать персистентный кэш резолва (backend из `RESOLVE__CACHE`); `--no-cache` выключает его для прогона |
 
 **`run`** (Вариант B, см. ниже)
 

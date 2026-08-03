@@ -77,13 +77,45 @@ class ResolveSettings(BaseModel):
         "Unset -> geo_maxmind yields nothing (country falls back to RDAP/WHOIS codes)",
     )
     rdap_timeout: int = Field(default=10, description="Socket timeout for the rdap resolver, seconds")
+    rdapss: bool = Field(
+        default=True,
+        description="rdap resolver: try the rdap.ss aggregator as a fallback BEFORE the RDAP "
+        "bootstrap when the direct lookup returned nothing (RIR RDAP unreachable but the "
+        "aggregator reachable). Fallback only — fires solely on an empty primary result.",
+    )
+    rdapss_url: str = Field(
+        default="https://rdap.ss/api/query?q=",
+        description="rdap resolver: rdap.ss aggregator query URL; the key (IP) is URL-appended. "
+        "Empty disables the fallback even if RESOLVE__RDAPSS is true.",
+    )
+    rdapss_timeout: int = Field(default=15, description="HTTP timeout for the rdap.ss fallback, seconds")
     rdap_bootstrap: bool = Field(
         default=True,
-        description="rdap resolver: on an empty ASN-based lookup, retry via the RDAP "
-        "bootstrap server (follows referrals to the right RIR without an ASN lookup). "
-        "Fallback only — adds a request solely when the primary lookup returned nothing.",
+        description="rdap resolver: on an empty lookup (after the rdap.ss fallback), retry via "
+        "the RDAP bootstrap server (follows referrals to the right RIR without an ASN lookup). "
+        "Fallback only — adds a request solely when the previous steps returned nothing.",
     )
     whois_timeout: int = Field(default=15, description="Socket timeout for the whois resolver, seconds")
+    tcinet: bool = Field(
+        default=False,
+        description="whois resolver: after the ipwhois whois, try TCI domain whois "
+        "(whois.tcinet.ru:43) for .ru/.su/.рф. Domain-oriented — for an IP key it returns "
+        "nothing, so enable it for domain runs (--key-column url_domain).",
+    )
+    tcinet_host: str = Field(default="whois.tcinet.ru", description="TCI domain whois host (port 43)")
+    tcinet_timeout: int = Field(default=15, description="Socket timeout for the tcinet fallback, seconds")
+    cache: Literal["default", "redis", "none"] = Field(
+        default="default",
+        description="Persistent resolve-cache backend: 'default' (a local SQLite file), 'redis' "
+        "(shared, needs the redis extra), or 'none'. The --cache/--no-cache flag toggles caching "
+        "for a run; this picks the backend.",
+    )
+    cache_path: str = Field(
+        default="~/.cache/pyresolv/resolve-cache.sqlite",
+        description="SQLite file path for the 'default' cache backend (~ is expanded).",
+    )
+    redis_url: str = Field(default="redis://localhost:6379/0", description="Redis URL for the 'redis' cache backend")
+    redis_prefix: str = Field(default="pyresolv:resolve:", description="Key prefix for the 'redis' cache backend")
     workers: int = Field(
         default=DEFAULT_RESOLVE_WORKERS,
         ge=1,

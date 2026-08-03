@@ -10,6 +10,7 @@ from pathlib import Path
 from pyresolv.config import get_settings
 from pyresolv.i18n import _
 from pyresolv.resolvers.base import get_resolver
+from pyresolv.resolvers.cache import NullCache, get_cache
 from pyresolv.sources.base import get_source
 from pyresolv.stages.aggregate import aggregate
 from pyresolv.subnets import parse_cidrs
@@ -80,11 +81,13 @@ def run_resolve(args: argparse.Namespace) -> int:
     resolver_name = args.resolver or settings.default_resolver
     resolver = get_resolver(resolver_name)
     max_workers = args.workers if args.workers is not None else settings.resolve.workers
+    cache = get_cache(settings.resolve.cache, settings.resolve) if args.cache else NullCache()
     return resolver.resolve(
         input_path=args.input[0] if args.input else None,
         output_path=args.output,
         key_column=args.key_column,
         max_workers=max_workers,
+        cache=cache,
     )
 
 

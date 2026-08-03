@@ -39,7 +39,11 @@ collect  ->  trim  ->  merge  ->  aggregate  ->  resolve
   (country from a local MaxMind `.mmdb` — set `RESOLVE__MMDB_PATH` and
   `pip install -e '.[geo]'`), and `gunter` (the external HTTP service).
   Idempotent: already-filled rows are not resolved again and make no network
-  calls.
+  calls. Results are also cached across runs (persistent cache, `--cache` on by
+  default): each unique key is looked up at most once until its cache entry
+  expires — the resolved expiry date + 1 day, or the 1st of next month when no
+  date is available (empty/failed lookups are not cached). Backend via
+  `RESOLVE__CACHE` (`default` SQLite / `redis` / `none`); `--no-cache` disables it.
 
 Sources and resolvers are plugins, registered by name
 (`pyresolv/sources/`, `pyresolv/resolvers/`); to add a new source
@@ -153,9 +157,19 @@ List values (`SRC_IP_LIST`, `SRC_IP_CIDR`) are JSON arrays, e.g. `["10.2.83.0/24
 |---|---|---|
 | `RESOLVE__MMDB_PATH` | *(unset)* | Path to a local MaxMind GeoLite2 `.mmdb` for `geo_maxmind`; unset → geo yields nothing |
 | `RESOLVE__RDAP_TIMEOUT` | `10` | Socket timeout for the `rdap` resolver, seconds |
+| `RESOLVE__RDAPSS` | `true` | `rdap` fallback: query the rdap.ss aggregator (before bootstrap) when the direct lookup returned nothing |
+| `RESOLVE__RDAPSS_URL` | `https://rdap.ss/api/query?q=` | rdap.ss query URL (empty also disables the fallback) |
+| `RESOLVE__RDAPSS_TIMEOUT` | `15` | HTTP timeout for the rdap.ss fallback, seconds |
 | `RESOLVE__RDAP_BOOTSTRAP` | `true` | On an empty RDAP lookup, retry via the RDAP bootstrap server (fallback only) |
 | `RESOLVE__WHOIS_TIMEOUT` | `15` | Socket timeout for the `whois` resolver, seconds |
+| `RESOLVE__TCINET` | `false` | `whois` fallback: TCI domain whois (`whois.tcinet.ru:43`) for .ru/.su/.рф — domain-only, enable for `--key-column url_domain` runs |
+| `RESOLVE__TCINET_HOST` | `whois.tcinet.ru` | TCI domain whois host (port 43) |
+| `RESOLVE__TCINET_TIMEOUT` | `15` | Socket timeout for the tcinet fallback, seconds |
 | `RESOLVE__WORKERS` | `3` | Default number of resolving threads for **any** resolver (overridden by `--workers`) |
+| `RESOLVE__CACHE` | `default` | Persistent resolve-cache backend: `default` (SQLite file), `redis`, or `none` |
+| `RESOLVE__CACHE_PATH` | `~/.cache/pyresolv/resolve-cache.sqlite` | SQLite file for the `default` backend |
+| `RESOLVE__REDIS_URL` | `redis://localhost:6379/0` | Redis URL for the `redis` backend |
+| `RESOLVE__REDIS_PREFIX` | `pyresolv:resolve:` | Key prefix for the `redis` backend |
 
 ## Running
 
@@ -215,6 +229,7 @@ Without installing the package, you can run as a module:
 | `--resolver NAME` | `DEFAULT_RESOLVER` / `default` | `default` / `rdap` / `whois` / `geo_maxmind` / `gunter` |
 | `--key-column COL` | `DstIP` | Column holding the IP to resolve |
 | `--workers N` | `RESOLVE__WORKERS` / `3` | Number of resolving threads |
+| `--cache` / `--no-cache` | `--cache` | Use the persistent resolve cache (backend from `RESOLVE__CACHE`); `--no-cache` disables it for this run |
 
 **`run`** (Variant B, see below)
 
