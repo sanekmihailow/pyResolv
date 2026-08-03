@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.2] - 2026-08-03
+
+### Changed
+- `geoip2` is now a base dependency (`requirements.txt`) instead of only the `.[geo]` extra,
+  so `geo_maxmind` works out of the box once `RESOLVE__MMDB_PATH` points to a `.mmdb`.
+- `tools/diagnose_graylog.py`: added step `[7] newest timestamp` (the freshest `timestamp`
+  in the index vs. now) so a "0 rows" caused by a too-narrow time window / stalled ingestion
+  is obvious at a glance.
+
+### Fixed
+- `tools/diagnose_graylog.py`: the test window now spans the full `--start..--end` range
+  (`now-Nd..now`) instead of only the newest single 1-unit slice (`build_time_windows(...)[0]`),
+  so the ladder reflects what `collect` actually pulls for the given window.
+
 ## [2.6.1] - 2026-08-03
 
 ### Fixed

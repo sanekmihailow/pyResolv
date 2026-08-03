@@ -20,10 +20,11 @@ import argparse
 import copy
 import json
 import sys
+from datetime import datetime
 
 import requests
 
-from pyresolv.sources.base import build_time_windows
+from pyresolv.sources.base import build_time_expr
 from pyresolv.sources.graylog import GraylogSource
 
 
@@ -63,8 +64,10 @@ def main() -> None:
     print(f"src_ip_cidr   : {s.src_ip_cidr}")
     print()
 
-    # A single window to test against.
-    gte, lt, *_ = build_time_windows(args.start, args.end, args.time_unit)[0]
+    # The FULL span collect covers (union of all its 1-unit windows), so the test
+    # matches what --start/--end/--time-unit actually pull — not just the newest slice.
+    gte = build_time_expr(args.start, args.time_unit)
+    lt = build_time_expr(args.end, args.time_unit)
     print(f"=== test window: {gte} .. {lt} ===\n")
 
     # 0) How many docs does the index pattern hold at all?
@@ -122,6 +125,24 @@ def main() -> None:
     except requests.RequestException as e:
         print(f"    ERROR: {e}", file=sys.stderr)
 
+    # 7) Newest timestamp in the index — is the data recent enough for the window?
+    print("\n[7] newest `timestamp` in the index (is the data fresh, or is the window too narrow?)")
+    try:
+        resp = requests.post(
+            f"{src._url}?size=1",
+            headers={"Content-Type": "application/json"},
+            json={"sort": [{"timestamp": "desc"}], "_source": ["timestamp"]},
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        hits = resp.json().get("hits", {}).get("hits", [])
+        newest = hits[0].get("_source", {}).get("timestamp") if hits else None
+        print(f"    newest timestamp = {newest!r}   (now = {datetime.now():%Y-%m-%d %H:%M:%S})")
+        print("    If this is well in the past, --start/--time-unit must reach back that far")
+        print("    (or the source stopped feeding graylog).")
+    except requests.RequestException as e:
+        print(f"    ERROR: {e}", file=sys.stderr)
+
     print("\n=== how to read this ===")
     print("The FIRST layer above that jumps from 0 to > 0 is the clause that")
     print("filters everything out:")
@@ -130,7 +151,9 @@ def main() -> None:
     print("  [1]=0, [2]>0     -> your SrcIP list / CIDR is wrong (no such source IPs)")
     print("  [2]=0, [3]>0     -> stream_id is wrong (GRAYLOG__STREAM_ID)")
     print("  [3]=0, [4]>0     -> the SrcIP/DstIP field names differ (see [6])")
-    print("  [4]=0, [0]>0     -> the timestamp field/format is wrong (see [6])")
+    print("  [4]=0, [0]>0     -> no data in the time window: either the window is too")
+    print("                      narrow for how fresh the data is (see [7]), or the")
+    print("                      timestamp field/format is wrong (see [6])")
     print("  [0]=0            -> wrong index pattern or URL (nothing matches at all)")
     print("If [1]>0 but collect still wrote 0 rows: every hit is being dropped")
     print("client-side (DstIP private, non-IPv4, or SrcIP outside the exact CIDR).")
