@@ -70,6 +70,7 @@ class _RecWorkersResolver(Resolver):
 
     def enrich(self, df, key_column, max_workers, skip_already_enriched=True, cache=None):
         type(self).last_workers = max_workers
+        type(self).last_cache = type(cache).__name__
         return df
 
 
@@ -177,6 +178,52 @@ def test_pipeline_resolve_default_workers_from_resolve_settings(monkeypatch, tmp
                            output=str(tmp_path / "o.csv"), key_column="DstIP", cache=False)
     pipeline.run_resolve(args)
     assert _RecWorkersResolver.last_workers == 6
+
+
+# --- CLI step-param overrides for `run` (CLI > YAML > config) --------------
+
+def test_override_min_count_beats_yaml(tmp_path, raw_csv):
+    # YAML says min_count 1 (keep all); CLI override 3 keeps only the count-3 group.
+    cfg = _write(tmp_path, "- trim\n- aggregate: {min_count: 1}\n")
+    n = run_pipeline(cfg, input_path=str(raw_csv), output_path=str(tmp_path / "o.csv"),
+                     overrides={"min_count": 3})
+    assert n == 1
+
+
+def test_override_only_applies_to_steps_with_field(tmp_path, raw_csv):
+    # `start` is not a TrimParams field: it must be skipped for trim (extra="forbid"
+    # would otherwise raise), while `min_count` still overrides aggregate.
+    cfg = _write(tmp_path, "- trim\n- aggregate: {min_count: 1}\n")
+    n = run_pipeline(cfg, input_path=str(raw_csv), output_path=str(tmp_path / "o.csv"),
+                     overrides={"start": 9, "min_count": 3})
+    assert n == 1
+
+
+def test_override_out_dir(tmp_path, raw_csv, monkeypatch):
+    from types import SimpleNamespace
+    outdir = tmp_path / "od"
+    stub = SimpleNamespace(min_uniq_count=1, graylog=SimpleNamespace(src_ip_cidr=["10.0.0.0/24"]))
+    monkeypatch.setattr("pyresolv.runner.get_settings", lambda: stub)
+    cfg = _write(tmp_path, "- trim\n- aggregate\n")  # no out_dir in YAML
+    run_pipeline(cfg, input_path=str(raw_csv), output_path=str(tmp_path / "o.csv"),
+                 overrides={"out_dir": str(outdir)})
+    assert list(outdir.glob("*.csv"))  # per-subnet files written to the overridden dir
+
+
+def test_override_cache_false_uses_null_cache(tmp_path, raw_csv):
+    _RecWorkersResolver.last_cache = None
+    cfg = _write(tmp_path, "- trim\n- aggregate\n- resolve: {resolver: rec_workers}\n")
+    run_pipeline(cfg, input_path=str(raw_csv), output_path=str(tmp_path / "o.csv"),
+                 overrides={"cache": False})
+    assert _RecWorkersResolver.last_cache == "NullCache"
+
+
+def test_run_parser_collects_overrides():
+    from pyresolv.cli import build_run_parser
+    a = build_run_parser().parse_args(["--config", "p", "--out-dir", "/x", "--no-cache"])
+    assert a.out_dir == "/x" and a.cache is False
+    b = build_run_parser().parse_args(["--config", "p"])
+    assert b.out_dir is None and b.cache is None and b.start is None
 
 
 def test_first_step_needs_input_but_none(tmp_path):

@@ -86,6 +86,10 @@ tqdm already defaults to stderr) — stdout is reserved for the CSV wire format 
   read→core→write wrappers around the same logic, so both stay byte-identical. YAML steps are validated with
   per-step pydantic models (`extra="forbid"`), so a typo'd param fails fast before anything runs. `cli.main()`
   routes `argv[0] == "run"` to `runner.run_pipeline`; everything else is the classic `--type` parser, unchanged.
+  The `run` parser also accepts the stage flags (`--out-dir`, `--start`, `--min-count`, `--resolver`,
+  `--cache`, …, all `default=None`); `main()` forwards the provided ones as an `overrides` dict, and
+  `run_pipeline` merges them onto each step's YAML params for fields that step's model actually has
+  (`--start` → collect & aggregate, `--out-dir` → aggregate) — precedence **CLI > YAML > ENV/config**.
   Needs `PyYAML`.
 
 **`--delete`/`--del`**: handled centrally in `pipeline.dispatch` (via `_delete_inputs`), NOT inside individual

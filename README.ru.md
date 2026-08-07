@@ -241,12 +241,15 @@ pyresolv --type aggregate --streaming --chunk-size 500000 -i trimmed.csv -o aggr
 | `--config, -c PATH` | — *(обязательно)* | YAML-конфиг пайплайна |
 | `-i, --input PATH` | stdin | Начальный вход для первого шага |
 | `-o, --output PATH` | stdout | Итоговый вывод |
+| оверрайды шагов | *(из YAML)* | `--source --start --end --time-unit --min-count --out-dir --resolver --key-column --workers --cache/--no-cache` |
 
-> **Примечание:** для `run` это *единственные* флаги командной строки. Все
-> параметры **стадий** (`source`, `start`, `min_count`, `out_dir`, `resolver`,
-> `workers`, …) задаются **внутри YAML-конфига** как `имя: {параметр: значение}`,
-> а **не** флагом CLI — передать, например, `--out-dir` в `pyresolv run` нельзя,
-> это ошибка.
+> **Оверрайды:** параметры стадий обычно живут в YAML, но любой из флагов выше
+> можно передать и в `run`, чтобы **переопределить** YAML для каждого шага, у
+> которого есть такой параметр — приоритет **CLI > YAML > ENV/конфиг**. Удобно
+> для значений, которые вычисляет скрипт-обёртка, напр.:
+> `pyresolv run --config pipeline.yaml --out-dir /mnt/report/$(date +%F)`
+> (`--out-dir` → aggregate; `--start`/`--time-unit` → collect и aggregate;
+> директория создаётся автоматически).
 
 ## Единый пайплайн в одном процессе (`pyresolv run`)
 

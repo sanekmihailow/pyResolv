@@ -203,12 +203,8 @@ msgid "--start must be greater than --end, e.g. --start 5 --end 0"
 msgstr "--start должен быть больше --end, например --start 5 --end 0"
 
 #: pyresolv/sources/graylog.py
-msgid "[%(w)s] Batch %(b)d: received %(n)d documents"
-msgstr "[%(w)s] Батч %(b)d: получено %(n)d документов"
-
-#: pyresolv/sources/graylog.py
-msgid "[%(w)s] Batch %(b)d: wrote %(n)d rows"
-msgstr "[%(w)s] Батч %(b)d: записано %(n)d строк"
+msgid "collect %(w)s"
+msgstr "сбор %(w)s"
 
 #: pyresolv/sources/graylog.py
 msgid "Done for window %(w)s: %(b)d batches, %(n)d rows"
@@ -285,6 +281,50 @@ msgstr ""
 #: pyresolv/cli.py
 msgid "Final output; stdout by default."
 msgstr "Финальный выход; по умолчанию stdout."
+
+#: pyresolv/cli.py
+msgid "Override YAML step params (CLI wins over the pipeline file)"
+msgstr "Переопределить параметры шагов из YAML (CLI важнее файла пайплайна)"
+
+#: pyresolv/cli.py
+msgid "Override collect 'source'"
+msgstr "Переопределить 'source' у collect"
+
+#: pyresolv/cli.py
+msgid "Override collect/aggregate 'start'"
+msgstr "Переопределить 'start' у collect/aggregate"
+
+#: pyresolv/cli.py
+msgid "Override collect/aggregate 'end'"
+msgstr "Переопределить 'end' у collect/aggregate"
+
+#: pyresolv/cli.py
+msgid "Override collect/aggregate 'time_unit'"
+msgstr "Переопределить 'time_unit' у collect/aggregate"
+
+#: pyresolv/cli.py
+msgid "Override aggregate 'min_count'"
+msgstr "Переопределить 'min_count' у aggregate"
+
+#: pyresolv/cli.py
+msgid "Override aggregate 'out_dir'"
+msgstr "Переопределить 'out_dir' у aggregate"
+
+#: pyresolv/cli.py
+msgid "Override resolve 'resolver'"
+msgstr "Переопределить 'resolver' у resolve"
+
+#: pyresolv/cli.py
+msgid "Override resolve 'key_column'"
+msgstr "Переопределить 'key_column' у resolve"
+
+#: pyresolv/cli.py
+msgid "Override resolve 'workers'"
+msgstr "Переопределить 'workers' у resolve"
+
+#: pyresolv/cli.py
+msgid "Override resolve 'cache' (--cache/--no-cache)"
+msgstr "Переопределить 'cache' у resolve (--cache/--no-cache)"
 
 #: pyresolv/runner.py
 msgid "PyYAML is required for 'pyresolv run'. Install it: pip install pyyaml"

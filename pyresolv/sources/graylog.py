@@ -9,6 +9,7 @@ import sys
 from typing import Iterator, Optional
 
 import requests
+from tqdm import tqdm
 
 from pyresolv.config import get_settings
 from pyresolv.i18n import _
@@ -111,6 +112,14 @@ class GraylogSource(Source):
         written_rows = 0
         window_label = f"{time_gte}..{time_lt}"
 
+        # A single live status line per window (like `resolve`'s tqdm bar) instead
+        # of two printed lines per 5k-doc batch: bar advances by documents received,
+        # the `wrote` postfix tracks rows kept after the client-side filter.
+        bar = tqdm(
+            desc=_("collect %(w)s") % {"w": window_label},
+            unit="doc", unit_scale=True, file=sys.stderr, leave=False,
+        )
+
         while True:
             payload = self._build_payload(time_gte, time_lt, search_after)
             response = requests.post(
@@ -127,12 +136,6 @@ class GraylogSource(Source):
                 break
 
             batch_num += 1
-            batch_written = 0
-            print(
-                _("[%(w)s] Batch %(b)d: received %(n)d documents")
-                % {"w": window_label, "b": batch_num, "n": len(hits)},
-                file=sys.stderr,
-            )
 
             for hit in hits:
                 source = hit.get("_source", {})
@@ -159,16 +162,12 @@ class GraylogSource(Source):
 
                     yield {col: source.get(col) for col in COLLECT_COLUMNS}
                     written_rows += 1
-                    batch_written += 1
 
                 except ValueError:
                     continue
 
-            print(
-                _("[%(w)s] Batch %(b)d: wrote %(n)d rows")
-                % {"w": window_label, "b": batch_num, "n": batch_written},
-                file=sys.stderr,
-            )
+            bar.update(len(hits))
+            bar.set_postfix(wrote=written_rows)
 
             last_sort = hits[-1].get("sort")
             if not last_sort:
@@ -176,6 +175,7 @@ class GraylogSource(Source):
 
             search_after = last_sort
 
+        bar.close()
         print(
             _("Done for window %(w)s: %(b)d batches, %(n)d rows")
             % {"w": window_label, "b": batch_num, "n": written_rows},

@@ -24,6 +24,13 @@ from pyresolv.schema import DEFAULT_AGGREGATE_CHUNKSIZE, DEFAULT_KEY_COLUMN
 
 LANG_CHOICES = ["ru", "en"]
 
+# `run` step-param override flags -> forwarded to run_pipeline, applied on top of
+# the YAML per step that has the field (dest names match the runner param models).
+_RUN_OVERRIDE_KEYS = (
+    "source", "start", "end", "time_unit", "min_count",
+    "out_dir", "resolver", "key_column", "workers", "cache",
+)
+
 
 def _add_lang_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
@@ -219,6 +226,31 @@ def build_run_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help=_("Final output; stdout by default."),
     )
+
+    # Stage-parameter overrides: when given, they win over the YAML step value
+    # (precedence CLI > YAML > ENV/config default). Each applies only to steps
+    # that have that param (e.g. --out-dir -> aggregate, --resolver -> resolve,
+    # --start -> collect & aggregate). All default None = "not overridden".
+    override_group = parser.add_argument_group(
+        "step overrides", _("Override YAML step params (CLI wins over the pipeline file)")
+    )
+    override_group.add_argument("--source", default=None, help=_("Override collect 'source'"))
+    override_group.add_argument("--start", type=int, default=None, help=_("Override collect/aggregate 'start'"))
+    override_group.add_argument("--end", type=int, default=None, help=_("Override collect/aggregate 'end'"))
+    override_group.add_argument(
+        "--time-unit", choices=["d", "h"], default=None, help=_("Override collect/aggregate 'time_unit'")
+    )
+    override_group.add_argument("--min-count", type=int, default=None, help=_("Override aggregate 'min_count'"))
+    override_group.add_argument("--out-dir", default=None, metavar="DIR", help=_("Override aggregate 'out_dir'"))
+    override_group.add_argument("--resolver", default=None, help=_("Override resolve 'resolver'"))
+    override_group.add_argument("--key-column", default=None, help=_("Override resolve 'key_column'"))
+    override_group.add_argument("--workers", type=int, default=None, help=_("Override resolve 'workers'"))
+    override_group.add_argument(
+        "--cache",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=_("Override resolve 'cache' (--cache/--no-cache)"),
+    )
     return parser
 
 
@@ -240,7 +272,8 @@ def main() -> None:
     # `--type`-based interface (Variant A) stays exactly as before.
     if argv and argv[0] == "run":
         args = build_run_parser().parse_args(argv[1:])
-        _run_guarded(lambda: run_pipeline(args.config, args.input, args.output))
+        overrides = {k: getattr(args, k) for k in _RUN_OVERRIDE_KEYS if getattr(args, k, None) is not None}
+        _run_guarded(lambda: run_pipeline(args.config, args.input, args.output, overrides))
         return
 
     parser = build_parser()

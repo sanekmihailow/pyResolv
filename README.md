@@ -238,11 +238,15 @@ Without installing the package, you can run as a module:
 | `--config, -c PATH` | — *(required)* | YAML pipeline config |
 | `-i, --input PATH` | stdin | Initial input for the first step |
 | `-o, --output PATH` | stdout | Final output |
+| stage overrides | *(from YAML)* | `--source --start --end --time-unit --min-count --out-dir --resolver --key-column --workers --cache/--no-cache` |
 
-> **Note:** for `run` these are the *only* command-line flags. Every **stage**
-> parameter (`source`, `start`, `min_count`, `out_dir`, `resolver`, `workers`, …)
-> is set **inside the YAML config** as `name: {param: value}`, **not** as a CLI
-> flag — passing e.g. `--out-dir` to `pyresolv run` is an error.
+> **Overrides:** stage params normally live in the YAML, but any of the flags
+> above can also be passed to `run` to **override** the YAML for every step that
+> has that param — precedence **CLI > YAML > ENV/config**. Handy for values a
+> wrapper script computes per run, e.g.:
+> `pyresolv run --config pipeline.yaml --out-dir /mnt/report/$(date +%F)`
+> (`--out-dir` → aggregate; `--start`/`--time-unit` → collect & aggregate; the
+> out-dir is auto-created).
 
 ## Single-process pipeline (pyresolv run)
 

@@ -199,11 +199,14 @@ def run_pipeline(
     config_path: str,
     input_path: Optional[str] = None,
     output_path: Optional[str] = None,
+    overrides: Optional[Dict[str, object]] = None,
 ) -> int:
     """Run the whole pipeline in one process. Returns the number of rows in the
-    final frame."""
+    final frame. `overrides` are CLI step-param values that win over the YAML for
+    every step that has the field (precedence CLI > YAML > ENV/config default)."""
     steps = load_pipeline_config(config_path)
     settings = get_settings()
+    overrides = overrides or {}
     total = len(steps)
 
     frame: Optional[pd.DataFrame] = None
@@ -213,8 +216,11 @@ def run_pipeline(
     wrote_to_dir = False
     for idx, (name, raw) in enumerate(steps, start=1):
         model_cls, runner = STEP_TABLE[name]
+        merged = dict(raw)
+        # CLI overrides win over the YAML, but only for params this step has.
+        merged.update({k: v for k, v in overrides.items() if k in model_cls.model_fields})
         try:
-            params = model_cls(**raw)
+            params = model_cls(**merged)
         except ValidationError as e:
             raise ValueError(
                 _("Invalid params for step '%(step)s': %(err)s")

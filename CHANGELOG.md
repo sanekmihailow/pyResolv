@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-08-07
+
+### Added
+- `pyresolv run` now accepts stage-parameter override flags (`--source`, `--start`, `--end`,
+  `--time-unit`, `--min-count`, `--out-dir`, `--resolver`, `--key-column`, `--workers`,
+  `--cache`/`--no-cache`). A given flag overrides the YAML value for every step that has that
+  param (`--out-dir` → aggregate, `--start` → collect & aggregate, …) — precedence
+  **CLI > YAML > ENV/config**. Lets a wrapper script pass e.g. a per-run `--out-dir`
+  (`/mnt/report/$(date +%F)`) without editing the pipeline file.
+
+### Changed
+- `collect` (graylog): per-window progress is now a single live tqdm status line (documents
+  received, `wrote=` rows kept after filtering) instead of two printed lines per 5k-doc batch —
+  matching the `resolve` stage's progress bar.
+
 ## [2.6.2] - 2026-08-03
 
 ### Changed
