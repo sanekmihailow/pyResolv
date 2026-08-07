@@ -13,6 +13,14 @@ msgid "Force output language (overrides LANG/LC_MESSAGES); by default taken from
 msgstr "Принудительно задать язык вывода (перекрывает LANG/LC_MESSAGES); по умолчанию берётся из окружения, иначе английский"
 
 #: pyresolv/cli.py
+msgid "Also append all status/progress output (stderr) to PATH, with a timestamp per line — handy for cron runs. The terminal still shows live progress; stdout (the CSV data) is never written to the log."
+msgstr "Дублировать весь вывод статуса/прогресса (stderr) в PATH (дозапись), с таймстампом на каждой строке — удобно для запусков по крону. В терминале прогресс по-прежнему виден; stdout (данные CSV) в лог не пишется."
+
+#: pyresolv/logfile.py
+msgid "===== pyresolv started %(ts)s: %(cmd)s ====="
+msgstr "===== pyresolv запущен %(ts)s: %(cmd)s ====="
+
+#: pyresolv/cli.py
 msgid "pyResolv — process firewall logs with a set of filter stages (collect/trim/merge/aggregate/resolve) composed via shell pipes."
 msgstr "pyResolv — обработка логов сетевого экрана набором стадий-фильтров (collect/trim/merge/aggregate/resolve), соединяемых шелл-пайпами."
 

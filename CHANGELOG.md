@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-08-07
+
+### Added
+- Global `--log-file PATH` flag (both the classic `--type` interface and `run`): appends all
+  status/progress output (stderr) to PATH with a timestamp per line — handy for cron runs. The
+  terminal still shows live tqdm progress; the file copy collapses each tqdm `\r` redraw to its
+  final state (no carriage-return spam) and each run starts with a timestamped session header
+  (`===== pyresolv started … =====`). `stdout` (the CSV wire data) is never written to the log.
+
 ## [2.7.0] - 2026-08-07
 
 ### Added

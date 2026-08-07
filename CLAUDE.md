@@ -75,6 +75,11 @@ to the non-streaming full-load mode regardless of chunk boundaries (dtype can't 
 
 **Stage stdout is data-only**: every stage prints its status/progress messages to stderr (`print(..., file=sys.stderr)`,
 tqdm already defaults to stderr) — stdout is reserved for the CSV wire format so stages can be piped together.
+This stderr/stdout split is what makes the global **`--log-file PATH`** flag a ~30-line wrapper
+(`pyresolv/logfile.py::tee_stderr`, installed once at the top of `cli.main()` before any stage runs, so
+`print`/`tqdm`'s late `sys.stderr` lookup picks it up): it tees `sys.stderr` into PATH (append) with a
+timestamp per line, collapsing tqdm `\r` redraws to their final state and prefixing each run with a session
+header — while stdout (the CSV) is untouched. Meant for cron; the terminal still shows live progress.
 
 **Two ways to run a pipeline** (both use the same stages, produce the same result):
 - **Variant A** (`pipeline.py`): `pyresolv --type X | pyresolv --type Y` — one stage per OS process, glued by

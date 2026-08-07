@@ -18,6 +18,7 @@ from pyresolv import __version__
 from pyresolv import i18n
 from pyresolv.config import ConfigError
 from pyresolv.i18n import _
+from pyresolv.logfile import tee_stderr
 from pyresolv.pipeline import dispatch
 from pyresolv.runner import run_pipeline
 from pyresolv.schema import DEFAULT_AGGREGATE_CHUNKSIZE, DEFAULT_KEY_COLUMN
@@ -44,6 +45,19 @@ def _add_lang_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_log_file_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--log-file",
+        default=None,
+        metavar="PATH",
+        help=_(
+            "Also append all status/progress output (stderr) to PATH, with a "
+            "timestamp per line — handy for cron runs. The terminal still shows "
+            "live progress; stdout (the CSV data) is never written to the log."
+        ),
+    )
+
+
 def _preparse_lang(argv) -> str | None:
     """Extract --lang BEFORE building the main parser, so help text and errors
     are built in the chosen language (a chicken-and-egg problem)."""
@@ -63,6 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"pyresolv {__version__}")
     _add_lang_argument(parser)
+    _add_log_file_argument(parser)
 
     parser.add_argument(
         "--type",
@@ -205,6 +220,7 @@ def build_run_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"pyresolv {__version__}")
     _add_lang_argument(parser)
+    _add_log_file_argument(parser)
     parser.add_argument(
         "--config", "-c",
         required=True,
@@ -273,12 +289,14 @@ def main() -> None:
     if argv and argv[0] == "run":
         args = build_run_parser().parse_args(argv[1:])
         overrides = {k: getattr(args, k) for k in _RUN_OVERRIDE_KEYS if getattr(args, k, None) is not None}
-        _run_guarded(lambda: run_pipeline(args.config, args.input, args.output, overrides))
+        with tee_stderr(args.log_file):
+            _run_guarded(lambda: run_pipeline(args.config, args.input, args.output, overrides))
         return
 
     parser = build_parser()
     args = parser.parse_args(argv)
-    _run_guarded(lambda: dispatch(args))
+    with tee_stderr(args.log_file):
+        _run_guarded(lambda: dispatch(args))
 
 
 def _run_guarded(action) -> None:
