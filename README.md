@@ -298,12 +298,22 @@ For example, `aggregate --out-dir DIR` from Variant A becomes
   results stay on disk.
 - **Variant B** (`run --config`) — faster (no reserialization between
   steps) and with a single config, but holds the dataset **entirely in memory**.
-  Suitable for data that fits in RAM; for gigantic inputs use Variant A
-  with streaming.
+  Suitable for data that fits in RAM; for gigantic inputs add `--streaming`.
+- **Variant B + `--streaming`** — bounded-memory `run`: chains the same stages
+  through temporary CSV files in one process, so the dataset is never fully in
+  RAM (essentially "Variant A inside one process"). Opt-in; default `run` is
+  unchanged. The temp dir is `STREAMING__TEMP_LOG_PATH` (system temp by default;
+  put it on real disk, **not a tmpfs**), removed automatically after the run.
+  Put `resolve` **after** `aggregate` (it loads its frame fully), and `--out-dir`
+  only on the last step. Handy for cron on very large inputs:
+
+  ```bash
+  pyresolv run --config pipeline.yaml --streaming --out-dir /mnt/report/$(date +%F)
+  ```
 
 Both variants use the same stages and produce identical results:
 `run` with `trim -> aggregate` matches byte-for-byte with
-`trim | aggregate --no-streaming`.
+`trim | aggregate --no-streaming` (and `run --streaming` matches both).
 
 Requires `PyYAML` (included in `requirements.txt`).
 

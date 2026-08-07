@@ -124,6 +124,17 @@ class ResolveSettings(BaseModel):
     )
 
 
+class StreamingSettings(BaseModel):
+    """Settings for `pyresolv run --streaming` (the bounded-memory engine). All
+    optional with defaults, so it constructs with no .env."""
+    temp_log_path: Optional[str] = Field(
+        default=None,
+        description="Directory for `run --streaming` intermediate CSVs chained "
+        "between stages. Unset -> the system temp dir (tempfile.gettempdir()). "
+        "Put it on real disk, NOT a tmpfs /tmp, or streaming won't bound memory.",
+    )
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -148,6 +159,7 @@ class Settings(BaseSettings):
     graylog: Optional[GraylogSettings] = None
     gunter: Optional[GunterSettings] = None
     resolve: ResolveSettings = Field(default_factory=ResolveSettings)
+    streaming: StreamingSettings = Field(default_factory=StreamingSettings)
 
     def require_graylog(self) -> GraylogSettings:
         if self.graylog is None:

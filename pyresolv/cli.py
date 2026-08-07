@@ -267,6 +267,20 @@ def build_run_parser() -> argparse.ArgumentParser:
         default=None,
         help=_("Override resolve 'cache' (--cache/--no-cache)"),
     )
+
+    parser.add_argument(
+        "--streaming",
+        action="store_true",
+        default=False,
+        help=_(
+            "Bounded-memory engine: chain the stages through temporary CSV files "
+            "instead of holding the whole DataFrame in memory — safe for very large "
+            "inputs (the default in-memory engine can exhaust RAM). Temp dir from "
+            "STREAMING__TEMP_LOG_PATH (system temp by default; put it on real disk, "
+            "not a tmpfs). Put 'resolve' after 'aggregate' so it runs on the small "
+            "grouped result."
+        ),
+    )
     return parser
 
 
@@ -290,7 +304,9 @@ def main() -> None:
         args = build_run_parser().parse_args(argv[1:])
         overrides = {k: getattr(args, k) for k in _RUN_OVERRIDE_KEYS if getattr(args, k, None) is not None}
         with tee_stderr(args.log_file):
-            _run_guarded(lambda: run_pipeline(args.config, args.input, args.output, overrides))
+            _run_guarded(lambda: run_pipeline(
+                args.config, args.input, args.output, overrides, streaming=args.streaming,
+            ))
         return
 
     parser = build_parser()

@@ -4,6 +4,8 @@ the path-based Variant A stages. Fake source/resolver plugins keep it offline.
 """
 from __future__ import annotations
 
+import os
+import tempfile
 from types import SimpleNamespace
 
 import pandas as pd
@@ -72,6 +74,18 @@ class _RecWorkersResolver(Resolver):
         type(self).last_workers = max_workers
         type(self).last_cache = type(cache).__name__
         return df
+
+
+@register_resolver("boom_res")
+class _BoomResolver(Resolver):
+    """Raises inside enrich — used to check streaming temp cleanup on error."""
+    name = "boom_res"
+
+    def resolve_one(self, key):
+        return self._empty_result()
+
+    def enrich(self, df, key_column, max_workers, skip_already_enriched=True, cache=None):
+        raise RuntimeError("boom")
 
 
 # --- config validation ----------------------------------------------------
@@ -232,3 +246,94 @@ def test_first_step_needs_input_but_none(tmp_path):
     cfg = _write(tmp_path, "- trim\n")
     with pytest.raises(Exception):
         run_pipeline(cfg, input_path=str(tmp_path / "does_not_exist.csv"))
+
+
+# --- streaming engine (run --streaming, bounded memory) -------------------
+
+def test_streaming_matches_in_memory(tmp_path, raw_csv):
+    # The bounded-memory engine must produce byte-identical output to in-memory.
+    cfg = _write(tmp_path, "- trim\n- aggregate: {min_count: 2}\n")
+    out_mem = tmp_path / "mem.csv"
+    out_str = tmp_path / "str.csv"
+    run_pipeline(cfg, input_path=str(raw_csv), output_path=str(out_mem))
+    run_pipeline(cfg, input_path=str(raw_csv), output_path=str(out_str), streaming=True)
+    assert out_str.read_bytes() == out_mem.read_bytes()
+
+
+def test_streaming_collect_trim_aggregate(tmp_path):
+    cfg = _write(tmp_path, "- collect: {source: fake_src, start: 1, end: 0}\n- trim\n- aggregate\n")
+    out = tmp_path / "o.csv"
+    n = run_pipeline(cfg, output_path=str(out), streaming=True)
+    assert n == 2  # 3 fake rows -> 2 groups
+    assert "8.8.8.8,443,allow,google.com,r1,2" in out.read_text(encoding="utf-8")
+
+
+def test_streaming_uses_temp_log_path_and_cleans_up(tmp_path, raw_csv, monkeypatch):
+    temp_root = tmp_path / "streamtmp"
+    stub = SimpleNamespace(min_uniq_count=1,
+                           streaming=SimpleNamespace(temp_log_path=str(temp_root)))
+    monkeypatch.setattr("pyresolv.runner.get_settings", lambda: stub)
+
+    created = {}
+    real_td = tempfile.TemporaryDirectory
+
+    def spy_td(*a, **k):
+        td = real_td(*a, **k)
+        created["dir"], created["root_arg"] = td.name, k.get("dir")
+        return td
+
+    monkeypatch.setattr("pyresolv.runner.tempfile.TemporaryDirectory", spy_td)
+
+    cfg = _write(tmp_path, "- trim\n- aggregate\n")
+    run_pipeline(cfg, input_path=str(raw_csv), output_path=str(tmp_path / "o.csv"), streaming=True)
+
+    assert created["root_arg"] == str(temp_root)     # temp dir created under our path
+    assert str(temp_root) in created["dir"]
+    assert not os.path.exists(created["dir"])         # removed after the run
+    assert temp_root.exists()                          # the configured root itself remains
+
+
+def test_streaming_temp_cleaned_on_error(tmp_path, raw_csv, monkeypatch):
+    created = {}
+    real_td = tempfile.TemporaryDirectory
+
+    def spy_td(*a, **k):
+        td = real_td(*a, **k)
+        created["dir"] = td.name
+        return td
+
+    monkeypatch.setattr("pyresolv.runner.tempfile.TemporaryDirectory", spy_td)
+
+    cfg = _write(tmp_path, "- trim\n- aggregate\n- resolve: {resolver: boom_res, cache: false}\n")
+    with pytest.raises(RuntimeError, match="boom"):
+        run_pipeline(cfg, input_path=str(raw_csv), output_path=str(tmp_path / "o.csv"), streaming=True)
+    assert not os.path.exists(created["dir"])          # temp dir removed even on failure
+
+
+def test_streaming_out_dir_last_step(tmp_path, raw_csv, monkeypatch):
+    outdir = tmp_path / "od"
+    stub = SimpleNamespace(min_uniq_count=1,
+                           streaming=SimpleNamespace(temp_log_path=None),
+                           graylog=SimpleNamespace(src_ip_cidr=["10.0.0.0/24"]))
+    monkeypatch.setattr("pyresolv.runner.get_settings", lambda: stub)
+    cfg = _write(tmp_path, "- trim\n- aggregate\n")
+    run_pipeline(cfg, input_path=str(raw_csv), output_path=str(tmp_path / "o.csv"),
+                 overrides={"out_dir": str(outdir)}, streaming=True)
+    assert list(outdir.glob("*.csv"))                  # per-subnet files written
+
+
+def test_streaming_out_dir_not_last_errors(tmp_path, raw_csv, monkeypatch):
+    stub = SimpleNamespace(min_uniq_count=1,
+                           streaming=SimpleNamespace(temp_log_path=None),
+                           graylog=SimpleNamespace(src_ip_cidr=["10.0.0.0/24"]))
+    monkeypatch.setattr("pyresolv.runner.get_settings", lambda: stub)
+    # aggregate --out-dir is not the terminal step -> must fail fast.
+    cfg = _write(tmp_path, "- trim\n- aggregate: {out_dir: X}\n- trim\n")
+    with pytest.raises(ValueError, match="not the last step"):
+        run_pipeline(cfg, input_path=str(raw_csv), output_path=str(tmp_path / "o.csv"), streaming=True)
+
+
+def test_run_parser_streaming_flag():
+    from pyresolv.cli import build_run_parser
+    assert build_run_parser().parse_args(["--config", "p", "--streaming"]).streaming is True
+    assert build_run_parser().parse_args(["--config", "p"]).streaming is False

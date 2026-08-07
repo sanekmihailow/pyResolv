@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-08-07
+
+### Added
+- `pyresolv run --streaming`: a bounded-memory engine for the single-process pipeline. Instead of
+  holding the whole DataFrame in memory (the default in-memory engine, which can OOM on
+  tens-of-millions-of-rows inputs), it chains the existing byte-identical path-based stage
+  functions (`collect`/`trim`/`aggregate`/`resolve`) through temporary CSV files — memory stays
+  bounded while keeping the `run` UX (one process, one config, one log, override flags). Opt-in;
+  the default `run` behavior is unchanged. Output is byte-identical to the in-memory engine.
+- `STREAMING__TEMP_LOG_PATH` setting: directory for the `--streaming` intermediate CSVs (system
+  temp by default; put it on real disk, not a tmpfs, or streaming won't bound memory). The temp
+  dir is removed on exit, success or failure.
+- Note: `resolve` still loads its input frame fully, so place it **after** `aggregate` (it then
+  runs on the small grouped result); `--out-dir` is only valid on the last step in streaming mode.
+
 ## [2.8.0] - 2026-08-07
 
 ### Added

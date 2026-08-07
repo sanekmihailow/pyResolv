@@ -96,6 +96,20 @@ header — while stdout (the CSV) is untouched. Meant for cron; the terminal sti
   `run_pipeline` merges them onto each step's YAML params for fields that step's model actually has
   (`--start` → collect & aggregate, `--out-dir` → aggregate) — precedence **CLI > YAML > ENV/config**.
   Needs `PyYAML`.
+  - **`run --streaming`** (opt-in; default is the in-memory engine above, unchanged): a **bounded-memory**
+    engine for very large inputs (the in-memory one loads the whole dataset and can OOM on tens-of-millions of
+    rows). `runner._run_streaming` chains the **path-based** stage functions (`collect`/`trim`/`aggregate`/
+    `resolver.resolve` — the same byte-identical cores as Variant A) through **temporary CSV files** in one
+    process: each step reads the previous step's file and writes the next, the first step's input is the real
+    `-i`/stdin (collect ignores it), the last writes the real `-o`/`--out-dir`. So `run --streaming` is
+    essentially "Variant A inside one process" — it gives up Variant B's "no CSV re-serialization" to bound
+    memory, and output stays byte-identical to both other paths. The temp dir is `STREAMING__TEMP_LOG_PATH`
+    (else the system temp), created if missing and removed on exit (success **or** failure via
+    `tempfile.TemporaryDirectory`) — put it on real disk, **not a tmpfs `/tmp`**, or memory isn't actually
+    bounded. Param handling is shared with the in-memory engine via `_resolve_step_params` (same
+    CLI>YAML>ENV merge). Caveats: `resolve` still loads its frame fully, so place it **after** `aggregate` (it
+    then runs on the small grouped result); `--out-dir` is only valid on the **last** step (it writes per-subnet
+    files and yields no single CSV to chain — a non-last `out_dir` raises a clear error).
 
 **`--delete`/`--del`**: handled centrally in `pipeline.dispatch` (via `_delete_inputs`), NOT inside individual
 stages — after the stage handler returns successfully, it removes the stage's `-i` input file(s), so a chain
