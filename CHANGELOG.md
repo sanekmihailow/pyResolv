@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.9.1] - 2026-08-08
+
+### Fixed
+- `pyresolv run` with `aggregate: {out_dir: …}` followed by a `resolve` step now writes **enriched**
+  per-subnet files. Previously the per-subnet split ran **inside** the aggregate step (before resolve),
+  so the files had no `country`/`asn`/`asn_descr`/`contacts` and the resolve step's output was silently
+  discarded (any `out_dir` made the engine skip the final write). The split is now a terminal sink applied
+  by the engine (`runner._finalize`) to the **final** frame — after resolve — in both the in-memory and
+  `--streaming` engines. `--out-dir` is no longer restricted to the last step.
+
 ## [2.9.0] - 2026-08-07
 
 ### Added

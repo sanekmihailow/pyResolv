@@ -107,9 +107,13 @@ header — while stdout (the CSV) is untouched. Meant for cron; the terminal sti
     (else the system temp), created if missing and removed on exit (success **or** failure via
     `tempfile.TemporaryDirectory`) — put it on real disk, **not a tmpfs `/tmp`**, or memory isn't actually
     bounded. Param handling is shared with the in-memory engine via `_resolve_step_params` (same
-    CLI>YAML>ENV merge). Caveats: `resolve` still loads its frame fully, so place it **after** `aggregate` (it
-    then runs on the small grouped result); `--out-dir` is only valid on the **last** step (it writes per-subnet
-    files and yields no single CSV to chain — a non-last `out_dir` raises a clear error).
+    CLI>YAML>ENV merge). Caveat: `resolve` still loads its frame fully, so place it **after** `aggregate` (it
+    then runs on the small grouped result). `--out-dir` is a **terminal sink applied by the engine to the FINAL
+    frame** (`runner._finalize`), not written inside the `aggregate` step — so `aggregate --out-dir` followed by
+    `resolve` writes **enriched** per-subnet files (the split sees the post-resolve frame). This holds in both
+    engines and fixes the earlier bug where the split ran before resolve (un-enriched files, resolve output
+    discarded). When an `out_dir` is requested, every step writes to a temp file and the final one is split;
+    otherwise the last step writes `-o` directly.
 
 **`--delete`/`--del`**: handled centrally in `pipeline.dispatch` (via `_delete_inputs`), NOT inside individual
 stages — after the stage handler returns successfully, it removes the stage's `-i` input file(s), so a chain

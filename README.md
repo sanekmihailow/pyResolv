@@ -304,8 +304,10 @@ For example, `aggregate --out-dir DIR` from Variant A becomes
   RAM (essentially "Variant A inside one process"). Opt-in; default `run` is
   unchanged. The temp dir is `STREAMING__TEMP_LOG_PATH` (system temp by default;
   put it on real disk, **not a tmpfs**), removed automatically after the run.
-  Put `resolve` **after** `aggregate` (it loads its frame fully), and `--out-dir`
-  only on the last step. Handy for cron on very large inputs:
+  Put `resolve` **after** `aggregate` (it loads its frame fully); `--out-dir` is a
+  terminal split of the **final** frame, so `aggregate --out-dir` followed by
+  `resolve` writes **enriched** per-subnet files. Handy for cron on very large
+  inputs:
 
   ```bash
   pyresolv run --config pipeline.yaml --streaming --out-dir /mnt/report/$(date +%F)

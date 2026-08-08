@@ -322,15 +322,32 @@ def test_streaming_out_dir_last_step(tmp_path, raw_csv, monkeypatch):
     assert list(outdir.glob("*.csv"))                  # per-subnet files written
 
 
-def test_streaming_out_dir_not_last_errors(tmp_path, raw_csv, monkeypatch):
-    stub = SimpleNamespace(min_uniq_count=1,
-                           streaming=SimpleNamespace(temp_log_path=None),
-                           graylog=SimpleNamespace(src_ip_cidr=["10.0.0.0/24"]))
+@pytest.mark.parametrize("streaming", [False, True])
+def test_out_dir_then_resolve_enriches_split(tmp_path, raw_csv, monkeypatch, streaming):
+    # Regression: aggregate --out-dir followed by resolve must produce ENRICHED
+    # per-subnet files (the split is applied to the final, post-resolve frame),
+    # in both engines. Previously the split ran before resolve, so the files had
+    # no country/asn and resolve's output was discarded.
+    _FakeResolver.calls = 0
+    outdir = tmp_path / "od"
+    stub = SimpleNamespace(
+        min_uniq_count=1, default_resolver="fake_res",
+        graylog=SimpleNamespace(src_ip_cidr=["10.0.0.0/24"]),
+        resolve=SimpleNamespace(workers=1, cache="none"),
+        streaming=SimpleNamespace(temp_log_path=None),
+    )
     monkeypatch.setattr("pyresolv.runner.get_settings", lambda: stub)
-    # aggregate --out-dir is not the terminal step -> must fail fast.
-    cfg = _write(tmp_path, "- trim\n- aggregate: {out_dir: X}\n- trim\n")
-    with pytest.raises(ValueError, match="not the last step"):
-        run_pipeline(cfg, input_path=str(raw_csv), output_path=str(tmp_path / "o.csv"), streaming=True)
+    cfg = _write(
+        tmp_path,
+        f"- trim\n- aggregate: {{out_dir: {outdir}}}\n- resolve: {{resolver: fake_res, cache: false}}\n",
+    )
+    run_pipeline(cfg, input_path=str(raw_csv), output_path=str(tmp_path / "o.csv"), streaming=streaming)
+
+    files = list(outdir.glob("*.csv"))
+    assert files
+    header, *rows = files[0].read_text(encoding="utf-8").splitlines()
+    assert "country" in header and "asn" in header          # enriched columns present
+    assert any("US" in r and "AS15169" in r for r in rows)  # enrichment landed in the split
 
 
 def test_run_parser_streaming_flag():

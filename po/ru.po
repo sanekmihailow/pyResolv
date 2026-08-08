@@ -339,10 +339,6 @@ msgid "Bounded-memory engine: chain the stages through temporary CSV files inste
 msgstr "Движок с ограниченной памятью: сцепляет стадии через временные CSV-файлы вместо того чтобы держать весь DataFrame в памяти — безопасно для очень больших входов (in-memory-движок по умолчанию может исчерпать RAM). Каталог для temp — из STREAMING__TEMP_LOG_PATH (по умолчанию системный temp; размещайте на реальном диске, не в tmpfs). Ставьте 'resolve' после 'aggregate', чтобы он работал по маленькому сгруппированному результату."
 
 #: pyresolv/runner.py
-msgid "Step '%(step)s' uses out_dir but is not the last step: --out-dir writes per-subnet files and produces no single output to feed the next step. Put it last."
-msgstr "Шаг '%(step)s' использует out_dir, но не является последним: --out-dir пишет пофайловый сплит по подсетям и не даёт единого вывода для следующего шага. Поставьте его последним."
-
-#: pyresolv/runner.py
 msgid "Unknown pipeline step '%(step)s'."
 msgstr "Неизвестный шаг пайплайна '%(step)s'."
 

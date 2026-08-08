@@ -105,21 +105,11 @@ def _run_merge(frame: Optional[pd.DataFrame], p: MergeParams, s: Settings) -> pd
 
 
 def _run_aggregate(frame: Optional[pd.DataFrame], p: AggregateParams, s: Settings) -> pd.DataFrame:
+    # NOTE: out_dir is NOT written here. The per-subnet split is a terminal sink
+    # applied by the engine to the FINAL frame (see _finalize), so that a resolve
+    # step after aggregate still lands in the per-subnet files.
     min_count = p.min_count if p.min_count is not None else s.min_uniq_count
-    result = aggregate_frame(_require_frame(frame, "aggregate"), min_count=min_count)
-    if p.out_dir:
-        cidrs = s.graylog.src_ip_cidr if s.graylog else []
-        networks = parse_cidrs(cidrs)
-        if not networks:
-            raise ValueError(_(
-                "--out-dir needs subnets: set GRAYLOG__SRC_IP_CIDR in .env "
-                "(see .env.example)."
-            ))
-        write_split_by_subnet(
-            result, p.out_dir, networks, "aggregation", datetime.now(),
-            p.start, p.end, p.time_unit,
-        )
-    return result
+    return aggregate_frame(_require_frame(frame, "aggregate"), min_count=min_count)
 
 
 def _run_resolve(frame: Optional[pd.DataFrame], p: ResolveParams, s: Settings) -> pd.DataFrame:
@@ -236,6 +226,46 @@ def run_pipeline(
     return _run_in_memory(steps, input_path, output_path, overrides, settings)
 
 
+SplitRequest = Tuple[str, int, int, str]  # (out_dir, start, end, time_unit)
+
+
+def _split_request(params: _StepParams) -> Optional[SplitRequest]:
+    """The per-subnet split a step asks for via out_dir (aggregate), or None.
+    Captured while iterating steps and applied by _finalize to the final frame."""
+    out_dir = getattr(params, "out_dir", None)
+    if not out_dir:
+        return None
+    return (out_dir, params.start, params.end, params.time_unit)
+
+
+def _finalize(
+    frame: pd.DataFrame,
+    output_path: Optional[str],
+    split_request: Optional[SplitRequest],
+    settings: Settings,
+) -> None:
+    """Write the pipeline's FINAL frame. With an out_dir request, split it per
+    subnet (so it includes any resolve enrichment that ran after aggregate);
+    otherwise write a single CSV to -o/stdout."""
+    if split_request is not None:
+        out_dir, start, end, time_unit = split_request
+        networks = parse_cidrs(settings.graylog.src_ip_cidr if settings.graylog else [])
+        if not networks:
+            raise ValueError(_(
+                "--out-dir needs subnets: set GRAYLOG__SRC_IP_CIDR in .env "
+                "(see .env.example)."
+            ))
+        write_split_by_subnet(
+            frame, out_dir, networks, "aggregation", datetime.now(),
+            start, end, time_unit,
+        )
+        if output_path not in (None, "-"):
+            print(_("Note: -o is ignored because a step wrote to --out-dir."), file=sys.stderr)
+    else:
+        with open_output(output_path) as out_f:
+            frame.to_csv(out_f, index=False)
+
+
 def _run_in_memory(
     steps: List[Tuple[str, dict]],
     input_path: Optional[str],
@@ -249,26 +279,20 @@ def _run_in_memory(
     if steps[0][0] in _NEEDS_INPUT:
         frame = read_frame(input_path)
 
-    wrote_to_dir = False
+    split_request: Optional[SplitRequest] = None
     for idx, (name, raw) in enumerate(steps, start=1):
         params = _resolve_step_params(name, raw, overrides)
         _runner = STEP_TABLE[name][1]
         print(_("[%(i)d/%(n)d] %(step)s") % {"i": idx, "n": total, "step": name}, file=sys.stderr)
         frame = _runner(frame, params, settings)
-        # A step with out_dir writes per-subnet files itself -> no single -o file.
-        if getattr(params, "out_dir", None):
-            wrote_to_dir = True
+        sr = _split_request(params)
+        if sr is not None:
+            split_request = sr  # applied to the FINAL frame, after all steps
 
     if frame is None:  # pragma: no cover - guarded by load_pipeline_config
         raise ValueError(_("Pipeline produced no data."))
 
-    if wrote_to_dir:
-        if output_path not in (None, "-"):
-            print(_("Note: -o is ignored because a step wrote to --out-dir."), file=sys.stderr)
-    else:
-        with open_output(output_path) as out_f:
-            frame.to_csv(out_f, index=False)
-
+    _finalize(frame, output_path, split_request, settings)
     print(_("Pipeline finished: %(n)s rows") % {"n": f"{len(frame):,}"}, file=sys.stderr)
     return len(frame)
 
@@ -285,10 +309,21 @@ def _run_streaming(
     same validated params and byte-identical stage cores as the in-memory engine.
 
     Each step reads the previous step's file and writes the next one; the first
-    step's input is the real -i/stdin (or, for collect, nothing), the last step
-    writes the real -o/out_dir. The temp dir (STREAMING__TEMP_LOG_PATH, else the
-    system temp) is removed on exit, success or failure."""
+    step's input is the real -i/stdin (or, for collect, nothing). A single-CSV run
+    has the last step write the real -o; an out_dir run writes every step to a
+    temp file and splits the FINAL frame per subnet at the end (so a resolve after
+    aggregate lands in the per-subnet files). The temp dir (STREAMING__TEMP_LOG_PATH,
+    else the system temp) is removed on exit, success or failure."""
     total = len(steps)
+    # Resolve/validate all params up front so we know whether a per-subnet split is
+    # requested before choosing where the last step writes.
+    resolved = [(name, _resolve_step_params(name, raw, overrides)) for name, raw in steps]
+    split_request: Optional[SplitRequest] = None
+    for _name, params in resolved:
+        sr = _split_request(params)
+        if sr is not None:
+            split_request = sr
+
     temp_root = settings.streaming.temp_log_path or None
     if temp_root:
         os.makedirs(temp_root, exist_ok=True)
@@ -296,32 +331,24 @@ def _run_streaming(
     with tempfile.TemporaryDirectory(prefix="pyresolv-", dir=temp_root) as tmpdir:
         current_path = input_path  # None/'-' means stdin for the first step
         last_rows = 0
-        wrote_to_dir = False
 
-        for idx, (name, raw) in enumerate(steps, start=1):
-            params = _resolve_step_params(name, raw, overrides)
+        for idx, (name, params) in enumerate(resolved, start=1):
             is_last = idx == total
-            out_dir = getattr(params, "out_dir", None)
-            # out_dir writes per-subnet files and yields no single CSV to chain,
-            # so it is only valid as the terminal step.
-            if out_dir and not is_last:
-                raise ValueError(
-                    _("Step '%(step)s' uses out_dir but is not the last step: "
-                      "--out-dir writes per-subnet files and produces no single "
-                      "output to feed the next step. Put it last.") % {"step": name}
-                )
-
             print(_("[%(i)d/%(n)d] %(step)s") % {"i": idx, "n": total, "step": name}, file=sys.stderr)
-            step_out = output_path if is_last else os.path.join(tmpdir, f"{idx}_{name}.csv")
-            last_rows = _run_streaming_step(name, params, settings, current_path, step_out)
-
-            if out_dir:
-                wrote_to_dir = True  # terminal; nothing to chain further
+            # The final frame goes straight to -o only for a plain single-CSV run;
+            # with a split requested, every step writes a temp file and _finalize
+            # splits the final one.
+            if is_last and split_request is None:
+                step_out: Optional[str] = output_path
             else:
-                current_path = step_out
+                step_out = os.path.join(tmpdir, f"{idx}_{name}.csv")
+            last_rows = _run_streaming_step(name, params, settings, current_path, step_out)
+            current_path = step_out
 
-        if wrote_to_dir and output_path not in (None, "-"):
-            print(_("Note: -o is ignored because a step wrote to --out-dir."), file=sys.stderr)
+        if split_request is not None:
+            # The final file is the aggregated (and possibly resolved) result —
+            # small, so loading it to split by subnet stays bounded.
+            _finalize(read_frame(current_path), output_path, split_request, settings)
 
         print(_("Pipeline finished: %(n)s rows") % {"n": f"{last_rows:,}"}, file=sys.stderr)
         return last_rows
@@ -351,26 +378,15 @@ def _run_streaming_step(
         return merge(inputs, out_path)
 
     if name == "aggregate":
+        # Always aggregate to a plain CSV; the per-subnet split (out_dir) is a
+        # terminal sink handled by _finalize on the final frame, not here.
         min_count = params.min_count if params.min_count is not None else settings.min_uniq_count
-        networks = None
-        agg_out: Optional[str] = out_path
-        if params.out_dir:
-            cidrs = settings.graylog.src_ip_cidr if settings.graylog else []
-            networks = parse_cidrs(cidrs)
-            if not networks:
-                raise ValueError(_(
-                    "--out-dir needs subnets: set GRAYLOG__SRC_IP_CIDR in .env "
-                    "(see .env.example)."
-                ))
-            agg_out = None  # out_dir and output are mutually exclusive
         return aggregate(
             input_path=in_path,
-            output_path=agg_out,
+            output_path=out_path,
             streaming=True,
             chunk_size=DEFAULT_AGGREGATE_CHUNKSIZE,
             min_count=min_count,
-            out_dir=params.out_dir,
-            networks=networks,
             start=params.start,
             end=params.end,
             time_unit=params.time_unit,

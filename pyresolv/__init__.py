@@ -7,4 +7,4 @@ resolvers are plugins registered by name.
 
 __all__ = ["__version__"]
 
-__version__ = "2.9.0"
+__version__ = "2.9.1"
