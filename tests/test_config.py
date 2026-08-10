@@ -178,3 +178,31 @@ def test_env_example_src_ip_cidr_is_valid():
     assert isinstance(cidrs, list) and cidrs
     # All entries parse without raising.
     assert len(parse_cidrs(cidrs)) == len(set(cidrs))
+
+
+# --- --env flag: choose the .env location (config.set_env_file) --------------
+
+def test_set_env_file_loads_from_custom_path(tmp_path, monkeypatch):
+    from pyresolv import config
+    monkeypatch.delenv("DEFAULT_SOURCE", raising=False)
+    envf = tmp_path / "custom.env"
+    envf.write_text("DEFAULT_SOURCE=myfake\n", encoding="utf-8")
+    config.set_env_file(str(envf))
+    try:
+        assert config.get_settings().default_source == "myfake"
+    finally:
+        config.set_env_file(None)  # reset override + clear the cached Settings
+
+
+def test_set_env_file_missing_path_raises():
+    from pyresolv import config
+    with pytest.raises(ConfigError, match="not found"):
+        config.set_env_file("/no/such/dir/nope.env")
+
+
+def test_env_flag_parsed_by_both_parsers():
+    from pyresolv.cli import build_parser, build_run_parser
+    a = build_parser().parse_args(["--type", "trim", "--env", "/x/.env"])
+    assert a.env == "/x/.env"
+    b = build_run_parser().parse_args(["--config", "p", "--env", "/y/.env"])
+    assert b.env == "/y/.env"

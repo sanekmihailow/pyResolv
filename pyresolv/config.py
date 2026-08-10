@@ -23,6 +23,7 @@ not mid-stream.
 """
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from typing import List, Literal, Optional
 
@@ -178,6 +179,28 @@ class Settings(BaseSettings):
         return self.gunter
 
 
+# Optional override for the .env location (CLI --env). None -> the default `.env`
+# in the current directory (as declared in Settings.model_config).
+_env_file_override: Optional[str] = None
+
+
+def set_env_file(path: Optional[str]) -> None:
+    """Point Settings at a specific .env file (the CLI `--env` flag). Must run
+    before the first get_settings(); clears the cached Settings so the next call
+    reloads from the chosen file. `~` is expanded; a given-but-missing path is a
+    clear error (rather than silently falling back to defaults — the usual cron
+    footgun where a relative `.env`/cache path is resolved against the wrong cwd)."""
+    global _env_file_override
+    if path is not None:
+        path = os.path.expanduser(path)
+        if not os.path.isfile(path):
+            raise ConfigError(_("--env file not found: %(path)s") % {"path": path})
+    _env_file_override = path
+    get_settings.cache_clear()
+
+
 @lru_cache
 def get_settings() -> Settings:
+    if _env_file_override is not None:
+        return Settings(_env_file=_env_file_override)
     return Settings()

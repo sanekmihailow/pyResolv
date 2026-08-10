@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-08-10
+
+### Added
+- Global `--env PATH` flag (both the classic `--type` interface and `run`): load settings from a
+  specific `.env` file instead of the default `.env` in the current directory. Meant for cron, where
+  the working directory — and thus a relative `.env` (and any relative paths inside it, e.g.
+  `RESOLVE__CACHE_PATH`) — differs from an interactive shell's. `~` is expanded; a given-but-missing
+  path is a clear `ConfigError` (exit code 2) rather than a silent fallback to defaults. Implemented
+  via `config.set_env_file`, which points pydantic-settings at the chosen file before the first
+  `get_settings()`.
+
 ## [2.9.1] - 2026-08-08
 
 ### Fixed

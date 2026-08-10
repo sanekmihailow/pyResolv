@@ -201,6 +201,15 @@ All previously-hardcoded operational constants (`OPENSEARCH_URL`, `INDEX`, `STRE
 `pydantic-settings`. Nested settings use the `__` delimiter: `GRAYLOG__URL`, `GRAYLOG__STREAM_ID`,
 `GUNTER__BASE_URL`, etc.
 
+By default the `.env` is looked up **relative to the current working directory** (`SettingsConfigDict(env_file=".env")`),
+which is a cron footgun: cron runs from a different cwd, so a relative `.env` (and relative paths inside it, e.g.
+`RESOLVE__CACHE_PATH=.cache/def.sqlite`) resolve elsewhere or not at all. The global **`--env PATH`** flag overrides
+the location: `config.set_env_file(path)` (called inside `cli.main`'s guarded action, before the first
+`get_settings()`) points pydantic-settings at `path` via `Settings(_env_file=path)` and clears the `get_settings`
+lru-cache. `~` is expanded; a given-but-missing path raises a clear `ConfigError` (exit 2) instead of silently
+falling back to defaults. Real environment variables still win over the file (pydantic precedence: init/env > env_file
+> defaults). For cron, pass an absolute `--env` (and prefer absolute paths inside it).
+
 `Settings.graylog`/`Settings.gunter` are `Optional` — stages that don't need an integration (`trim`, `merge`,
 `aggregate`) never require one. (`aggregate` does read the top-level `min_uniq_count` field for `--min-count`'s
 default, but that is a plain scalar with a default — it constructs fine with no integration configured.) Stages

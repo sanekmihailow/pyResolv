@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from pyresolv import __version__
 from pyresolv import i18n
-from pyresolv.config import ConfigError
+from pyresolv.config import ConfigError, set_env_file
 from pyresolv.i18n import _
 from pyresolv.logfile import tee_stderr
 from pyresolv.pipeline import dispatch
@@ -41,6 +41,19 @@ def _add_lang_argument(parser: argparse.ArgumentParser) -> None:
         help=_(
             "Force output language (overrides LANG/LC_MESSAGES); "
             "by default taken from the environment, otherwise English"
+        ),
+    )
+
+
+def _add_env_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--env",
+        default=None,
+        metavar="PATH",
+        help=_(
+            "Path to the .env settings file (default: .env in the current "
+            "directory). Give an absolute path for cron, where the working "
+            "directory — and thus a relative .env — differs from yours."
         ),
     )
 
@@ -77,6 +90,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"pyresolv {__version__}")
     _add_lang_argument(parser)
+    _add_env_argument(parser)
     _add_log_file_argument(parser)
 
     parser.add_argument(
@@ -220,6 +234,7 @@ def build_run_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"pyresolv {__version__}")
     _add_lang_argument(parser)
+    _add_env_argument(parser)
     _add_log_file_argument(parser)
     parser.add_argument(
         "--config", "-c",
@@ -304,15 +319,16 @@ def main() -> None:
         args = build_run_parser().parse_args(argv[1:])
         overrides = {k: getattr(args, k) for k in _RUN_OVERRIDE_KEYS if getattr(args, k, None) is not None}
         with tee_stderr(args.log_file):
-            _run_guarded(lambda: run_pipeline(
-                args.config, args.input, args.output, overrides, streaming=args.streaming,
+            _run_guarded(lambda: (
+                set_env_file(args.env),
+                run_pipeline(args.config, args.input, args.output, overrides, streaming=args.streaming),
             ))
         return
 
     parser = build_parser()
     args = parser.parse_args(argv)
     with tee_stderr(args.log_file):
-        _run_guarded(lambda: dispatch(args))
+        _run_guarded(lambda: (set_env_file(args.env), dispatch(args)))
 
 
 def _run_guarded(action) -> None:
