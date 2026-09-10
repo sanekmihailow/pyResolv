@@ -390,3 +390,19 @@ def test_chain_provider_crash_is_swallowed():
     rdap = _StubProvider("rdap", {"asn": "8075", "asn_descr": "M", "contacts": "C", "country": "US"})
     out = _chain(geo, rdap, _StubProvider("whois", {})).resolve_one("1.2.3.4")
     assert out["asn"] == "8075" and out["country"] == "US"  # chain continued past the crash
+
+
+def test_geo_maxmind_says_why_it_is_disabled(monkeypatch, capsys):
+    """No RESOLVE__MMDB_PATH -> the tier is a no-op; it must say so once, or the
+    only visible trace is a 100%-failed resolve stat."""
+    from types import SimpleNamespace
+    from pyresolv.resolvers.geo_maxmind import GeoMaxmindResolver
+
+    monkeypatch.setattr(
+        "pyresolv.resolvers.geo_maxmind.get_settings",
+        lambda: SimpleNamespace(resolve=SimpleNamespace(mmdb_path="")),
+    )
+    r = GeoMaxmindResolver()
+    err = capsys.readouterr().err
+    assert "RESOLVE__MMDB_PATH" in err
+    assert r.resolve_one("8.8.8.8") == {c: "" for c in RESOLVE_COLUMNS}

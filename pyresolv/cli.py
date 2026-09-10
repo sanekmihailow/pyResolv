@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from pyresolv import __version__
 from pyresolv import i18n
-from pyresolv.config import ConfigError, set_env_file
+from pyresolv.config import ConfigError, parse_ttl, set_env_file
 from pyresolv.i18n import _
 from pyresolv.logfile import tee_stderr
 from pyresolv.pipeline import dispatch
@@ -29,8 +29,17 @@ LANG_CHOICES = ["ru", "en"]
 # the YAML per step that has the field (dest names match the runner param models).
 _RUN_OVERRIDE_KEYS = (
     "source", "start", "end", "time_unit", "min_count",
-    "out_dir", "resolver", "key_column", "workers", "cache",
+    "out_dir", "resolver", "key_column", "workers", "cache", "cache_ttl",
 )
+
+
+def _ttl_arg(value: str):
+    """argparse `type` for --cache-ttl: surface parse_ttl's own message (argparse
+    swallows a plain ValueError into "invalid <type> value")."""
+    try:
+        return parse_ttl(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e)) from None
 
 
 def _add_lang_argument(parser: argparse.ArgumentParser) -> None:
@@ -219,6 +228,18 @@ def build_parser() -> argparse.ArgumentParser:
             "for this run."
         ),
     )
+    resolve_group.add_argument(
+        "--cache-ttl",
+        type=_ttl_arg,
+        default=None,
+        metavar="TTL",
+        help=_(
+            "Lifetime of a cache entry: seconds or a number with a unit s/m/h/d/w "
+            "(e.g. 45m, 12h, 30d). Overrides RESOLVE__CACHE_TTL. Unset (default): "
+            "the resolver's expiry date + 1 day, otherwise the 1st of next month. "
+            "When set, it replaces that fallback and caps the resolver's expiry hint."
+        ),
+    )
 
     return parser
 
@@ -281,6 +302,13 @@ def build_run_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=None,
         help=_("Override resolve 'cache' (--cache/--no-cache)"),
+    )
+    override_group.add_argument(
+        "--cache-ttl",
+        type=_ttl_arg,
+        default=None,
+        metavar="TTL",
+        help=_("Override resolve 'cache_ttl' (e.g. 45m, 12h, 30d)"),
     )
 
     parser.add_argument(

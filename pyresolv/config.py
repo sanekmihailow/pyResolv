@@ -24,10 +24,11 @@ not mid-stream.
 from __future__ import annotations
 
 import os
+from datetime import timedelta
 from functools import lru_cache
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from pyresolv.i18n import _
@@ -36,6 +37,41 @@ from pyresolv.schema import DEFAULT_RESOLVE_WORKERS
 
 class ConfigError(RuntimeError):
     """Configuration for a specific integration (source/resolver) is missing."""
+
+
+_TTL_UNITS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days", "w": "weeks"}
+
+
+def parse_ttl(value) -> Optional[timedelta]:
+    """Parse a cache-TTL spec into a timedelta: a number of seconds ("3600") or a
+    number with a unit suffix — s/m/h/d/w ("45m", "12h", "30d", "2w"). Empty/None
+    -> None (no explicit TTL). Raises ValueError on anything else, so a typo in
+    .env / --cache-ttl fails at startup instead of silently disabling the TTL.
+
+    Lives here rather than in resolvers/cache.py (its only consumer) to keep
+    config.py free of `pyresolv.resolvers` imports: importing that package pulls
+    in the resolvers, which import config — a circular import."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, timedelta):
+        return value if value > timedelta(0) else None
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    unit = "s"
+    if text[-1] in _TTL_UNITS:
+        text, unit = text[:-1], text[-1]
+    try:
+        amount = float(text)
+    except ValueError:
+        raise ValueError(
+            _("Invalid cache TTL '%(value)s'. Expected a number of seconds or a "
+              "number with a unit: s, m, h, d, w (e.g. 45m, 12h, 30d, 2w).")
+            % {"value": value}
+        ) from None
+    if amount <= 0:
+        raise ValueError(_("Cache TTL must be positive, got '%(value)s'.") % {"value": value})
+    return timedelta(**{_TTL_UNITS[unit]: amount})
 
 
 class GraylogSettings(BaseModel):
@@ -117,6 +153,19 @@ class ResolveSettings(BaseModel):
     )
     redis_url: str = Field(default="redis://localhost:6379/0", description="Redis URL for the 'redis' cache backend")
     redis_prefix: str = Field(default="pyresolv:resolve:", description="Key prefix for the 'redis' cache backend")
+    cache_ttl: Optional[timedelta] = Field(
+        default=None,
+        description="Lifetime of a cache entry: seconds ('3600') or a number with a unit "
+        "s/m/h/d/w ('45m', '12h', '30d', '2w'). Unset -> the built-in rule (the resolver's "
+        "expiry date + 1 day, else the 1st of next month). When set, it replaces that "
+        "'1st of next month' fallback and caps the resolver's expiry hint. Overridden by --cache-ttl.",
+    )
+
+    @field_validator("cache_ttl", mode="before")
+    @classmethod
+    def _parse_cache_ttl(cls, value):
+        """Accept the human TTL spec ('30d') that pydantic itself would reject."""
+        return parse_ttl(value)
     workers: int = Field(
         default=DEFAULT_RESOLVE_WORKERS,
         ge=1,

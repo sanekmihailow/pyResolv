@@ -27,14 +27,14 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Dict, List, Literal, Optional, Tuple
 
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
-from pyresolv.config import Settings, get_settings
+from pyresolv.config import Settings, get_settings, parse_ttl
 from pyresolv.i18n import _
 from pyresolv.io import open_output
 from pyresolv.resolvers.base import get_resolver
@@ -85,6 +85,13 @@ class ResolveParams(_StepParams):
     key_column: str = DEFAULT_KEY_COLUMN
     workers: Optional[int] = None
     cache: bool = True
+    cache_ttl: Optional[timedelta] = None
+
+    @field_validator("cache_ttl", mode="before")
+    @classmethod
+    def _parse_cache_ttl(cls, value):
+        """YAML gives the human TTL spec ('30d'); --cache-ttl gives a timedelta."""
+        return parse_ttl(value)
 
 
 def _run_collect(frame: Optional[pd.DataFrame], p: CollectParams, s: Settings) -> pd.DataFrame:
@@ -117,7 +124,10 @@ def _run_resolve(frame: Optional[pd.DataFrame], p: ResolveParams, s: Settings) -
     resolver = get_resolver(resolver_name)
     max_workers = p.workers if p.workers is not None else s.resolve.workers
     cache = get_cache(s.resolve.cache, s.resolve) if p.cache else NullCache()
-    return resolver.enrich(_require_frame(frame, "resolve"), p.key_column, max_workers, cache=cache)
+    cache_ttl = p.cache_ttl if p.cache_ttl is not None else s.resolve.cache_ttl
+    return resolver.enrich(
+        _require_frame(frame, "resolve"), p.key_column, max_workers, cache=cache, cache_ttl=cache_ttl
+    )
 
 
 # name -> (params model, runner). Also the source of truth for valid step names.
@@ -396,7 +406,10 @@ def _run_streaming_step(
         resolver = get_resolver(params.resolver or settings.default_resolver)
         max_workers = params.workers if params.workers is not None else settings.resolve.workers
         cache = get_cache(settings.resolve.cache, settings.resolve) if params.cache else NullCache()
-        return resolver.resolve(in_path, out_path, params.key_column, max_workers, cache=cache)
+        cache_ttl = params.cache_ttl if params.cache_ttl is not None else settings.resolve.cache_ttl
+        return resolver.resolve(
+            in_path, out_path, params.key_column, max_workers, cache=cache, cache_ttl=cache_ttl
+        )
 
     raise ValueError(_("Unknown pipeline step '%(step)s'.") % {"step": name})  # pragma: no cover
 

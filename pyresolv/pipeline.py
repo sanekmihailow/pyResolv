@@ -82,12 +82,14 @@ def run_resolve(args: argparse.Namespace) -> int:
     resolver = get_resolver(resolver_name)
     max_workers = args.workers if args.workers is not None else settings.resolve.workers
     cache = get_cache(settings.resolve.cache, settings.resolve) if args.cache else NullCache()
+    cache_ttl = args.cache_ttl if args.cache_ttl is not None else settings.resolve.cache_ttl
     return resolver.resolve(
         input_path=args.input[0] if args.input else None,
         output_path=args.output,
         key_column=args.key_column,
         max_workers=max_workers,
         cache=cache,
+        cache_ttl=cache_ttl,
     )
 
 

@@ -23,6 +23,13 @@ class GeoMaxmindResolver(Resolver):
         self._reader = None
         path = get_settings().resolve.mmdb_path
         if not path:
+            # Say so once per run: otherwise this tier silently yields nothing
+            # and the only visible trace is a 100%-failed resolve stat.
+            print(
+                _("geo_maxmind disabled: RESOLVE__MMDB_PATH is not set, no country "
+                  "from a local MaxMind DB"),
+                file=sys.stderr,
+            )
             return
         try:
             import geoip2.database

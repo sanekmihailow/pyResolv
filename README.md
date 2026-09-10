@@ -42,8 +42,12 @@ collect  ->  trim  ->  merge  ->  aggregate  ->  resolve
   calls. Results are also cached across runs (persistent cache, `--cache` on by
   default): each unique key is looked up at most once until its cache entry
   expires — the resolved expiry date + 1 day, or the 1st of next month when no
-  date is available (empty/failed lookups are not cached). Backend via
-  `RESOLVE__CACHE` (`default` SQLite / `redis` / `none`); `--no-cache` disables it.
+  date is available (empty/failed lookups are not cached). An explicit TTL
+  (`RESOLVE__CACHE_TTL` / `--cache-ttl 30d`) replaces that fallback and caps the
+  resolver's expiry date. Backend via `RESOLVE__CACHE` (`default` SQLite /
+  `redis` / `none`); `--no-cache` disables it. When the run finishes, a stat line
+  reports how many keys came back empty — `Resolved: 118 of 130, failed: 12
+  (9.2%)` — i.e. exactly the ones not cached and retried on the next run.
 
 Sources and resolvers are plugins, registered by name
 (`pyresolv/sources/`, `pyresolv/resolvers/`); to add a new source
@@ -170,6 +174,7 @@ List values (`SRC_IP_LIST`, `SRC_IP_CIDR`) are JSON arrays, e.g. `["10.2.83.0/24
 | `RESOLVE__CACHE_PATH` | `~/.cache/pyresolv/resolve-cache.sqlite` | SQLite file for the `default` backend |
 | `RESOLVE__REDIS_URL` | `redis://localhost:6379/0` | Redis URL for the `redis` backend |
 | `RESOLVE__REDIS_PREFIX` | `pyresolv:resolve:` | Key prefix for the `redis` backend |
+| `RESOLVE__CACHE_TTL` | *(unset)* | Lifetime of a cache entry: seconds or a number with a unit `s/m/h/d/w` (`45m`, `12h`, `30d`, `2w`). Unset -> the built-in rule (expiry date + 1 day, else the 1st of next month). When set, it replaces that fallback and caps the expiry date. Overridden by `--cache-ttl` |
 
 ## Running
 
@@ -230,6 +235,7 @@ Without installing the package, you can run as a module:
 | `--key-column COL` | `DstIP` | Column holding the IP to resolve |
 | `--workers N` | `RESOLVE__WORKERS` / `3` | Number of resolving threads |
 | `--cache` / `--no-cache` | `--cache` | Use the persistent resolve cache (backend from `RESOLVE__CACHE`); `--no-cache` disables it for this run |
+| `--cache-ttl TTL` | `RESOLVE__CACHE_TTL` / *(built-in rule)* | Lifetime of a cache entry: `45m`, `12h`, `30d`, `2w` or bare seconds. Replaces the "1st of next month" fallback and caps the resolver's expiry date |
 
 **`run`** (Variant B, see below)
 
@@ -238,7 +244,7 @@ Without installing the package, you can run as a module:
 | `--config, -c PATH` | — *(required)* | YAML pipeline config |
 | `-i, --input PATH` | stdin | Initial input for the first step |
 | `-o, --output PATH` | stdout | Final output |
-| stage overrides | *(from YAML)* | `--source --start --end --time-unit --min-count --out-dir --resolver --key-column --workers --cache/--no-cache` |
+| stage overrides | *(from YAML)* | `--source --start --end --time-unit --min-count --out-dir --resolver --key-column --workers --cache/--no-cache --cache-ttl` |
 
 > **Overrides:** stage params normally live in the YAML, but any of the flags
 > above can also be passed to `run` to **override** the YAML for every step that
@@ -277,7 +283,7 @@ parameters mirror the Variant A stage flags (`--start` → `start`, etc.):
 | `trim` | *(none)* |
 | `merge` | `inputs` (list of CSV paths) |
 | `aggregate` | `min_count`, `out_dir`, `start`, `end`, `time_unit` |
-| `resolve` | `resolver`, `key_column`, `workers` |
+| `resolve` | `resolver`, `key_column`, `workers`, `cache`, `cache_ttl` |
 
 For example, `aggregate --out-dir DIR` from Variant A becomes
 `- aggregate: {out_dir: DIR, start: 5, end: 0, time_unit: h}` here (it needs

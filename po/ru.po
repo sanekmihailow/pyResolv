@@ -489,3 +489,27 @@ msgstr "[geo_maxmind][%(ip)s] ошибка запроса: %(err)s"
 #: pyresolv/resolvers/default_chain.py
 msgid "[default][%(name)s][%(ip)s] provider failed: %(err)s"
 msgstr "[default][%(name)s][%(ip)s] провайдер упал: %(err)s"
+
+#: pyresolv/config.py
+msgid "Invalid cache TTL '%(value)s'. Expected a number of seconds or a number with a unit: s, m, h, d, w (e.g. 45m, 12h, 30d, 2w)."
+msgstr "Некорректный TTL кэша '%(value)s'. Ожидается число секунд или число с единицей: s, m, h, d, w (например 45m, 12h, 30d, 2w)."
+
+#: pyresolv/config.py
+msgid "Cache TTL must be positive, got '%(value)s'."
+msgstr "TTL кэша должен быть положительным, получено '%(value)s'."
+
+#: pyresolv/cli.py
+msgid "Lifetime of a cache entry: seconds or a number with a unit s/m/h/d/w (e.g. 45m, 12h, 30d). Overrides RESOLVE__CACHE_TTL. Unset (default): the resolver's expiry date + 1 day, otherwise the 1st of next month. When set, it replaces that fallback and caps the resolver's expiry hint."
+msgstr "Время жизни записи кэша: секунды или число с единицей s/m/h/d/w (например 45m, 12h, 30d). Переопределяет RESOLVE__CACHE_TTL. Не задано (по умолчанию): дата истечения от резолвера + 1 день, иначе 1-е число следующего месяца. Если задано — заменяет этот запасной вариант и ограничивает подсказку резолвера."
+
+#: pyresolv/cli.py
+msgid "Override resolve 'cache_ttl' (e.g. 45m, 12h, 30d)"
+msgstr "Переопределить 'cache_ttl' для resolve (например 45m, 12h, 30d)"
+
+#: pyresolv/resolvers/base.py
+msgid "Resolved: %(ok)d of %(n)d, failed: %(failed)d (%(pct).1f%%) — empty results are not cached and will be retried"
+msgstr "Резолвинг завершён: %(ok)d из %(n)d, неудачных: %(failed)d (%(pct).1f%%) — пустые результаты не кэшируются и будут повторены при следующем запуске"
+
+#: pyresolv/resolvers/geo_maxmind.py
+msgid "geo_maxmind disabled: RESOLVE__MMDB_PATH is not set, no country from a local MaxMind DB"
+msgstr "geo_maxmind отключён: не задан RESOLVE__MMDB_PATH, страна из локальной базы MaxMind не определяется"

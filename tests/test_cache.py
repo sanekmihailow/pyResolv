@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 import pytest
 
+from pyresolv.config import parse_ttl
 from pyresolv.resolvers.base import Resolver
 from pyresolv.resolvers.cache import (
     NullCache,
@@ -53,6 +54,51 @@ def test_compute_cache_expiry_fallback_first_of_next_month():
 def test_compute_cache_expiry_caps_far_future():
     # A wildly far-future date exceeds the TTL cap -> fallback, not +1 day.
     assert compute_cache_expiry("2999-01-01") == _first_of_next_month(_NOW)
+
+
+# --- explicit TTL (RESOLVE__CACHE_TTL / --cache-ttl) -------------------------
+
+def test_parse_ttl_units_and_empty():
+    assert parse_ttl("30d") == timedelta(days=30)
+    assert parse_ttl("12h") == timedelta(hours=12)
+    assert parse_ttl("45m") == timedelta(minutes=45)
+    assert parse_ttl("2w") == timedelta(weeks=2)
+    assert parse_ttl("3600") == timedelta(seconds=3600)  # bare number = seconds
+    assert parse_ttl(" 1D ") == timedelta(days=1)        # trimmed, case-insensitive
+    assert parse_ttl(None) is None and parse_ttl("") is None
+    assert parse_ttl(timedelta(hours=1)) == timedelta(hours=1)
+
+
+@pytest.mark.parametrize("bad", ["nonsense", "10x", "-1d", "0h"])
+def test_parse_ttl_rejects_bad_values(bad):
+    with pytest.raises(ValueError):
+        parse_ttl(bad)
+
+
+def test_compute_cache_expiry_ttl_replaces_fallback():
+    ttl = timedelta(days=7)
+    exp = compute_cache_expiry(None, ttl)          # no date -> now + ttl, not the 1st
+    assert abs((exp - (_NOW + ttl)).total_seconds()) < 5
+    assert exp != _first_of_next_month(_NOW)
+
+
+def test_compute_cache_expiry_ttl_caps_expires_hint():
+    # A hint 30 days out with a 1-day TTL -> the TTL wins (entry stays fresher).
+    far = (_NOW + timedelta(days=30)).date().isoformat()
+    exp = compute_cache_expiry(far, timedelta(days=1))
+    assert abs((exp - (_NOW + timedelta(days=1))).total_seconds()) < 5
+
+
+def test_compute_cache_expiry_expires_hint_wins_when_sooner():
+    # A hint sooner than the TTL keeps its own date + 1 day.
+    tomorrow = (_NOW + timedelta(days=1)).date().isoformat()
+    exp = compute_cache_expiry(tomorrow, timedelta(days=30))
+    assert exp.date() == (_NOW + timedelta(days=2)).date()
+
+
+def test_compute_cache_expiry_ttl_capped_by_max_ttl():
+    exp = compute_cache_expiry(None, timedelta(days=5000))
+    assert exp <= _NOW + timedelta(days=367)
 
 
 # --- SqliteCache ------------------------------------------------------------
@@ -181,3 +227,48 @@ def test_enrich_caches_only_resolve_columns_with_expires(tmp_path):
     stored = cache.get(r._cache_key("1.2.3.4"))
     assert stored == {c: ("RU" if c == "country" else "") for c in RESOLVE_COLUMNS}
     assert "exp:" in r._cache_key("1.2.3.4")   # namespaced by resolver name
+
+
+def test_enrich_honours_cache_ttl(tmp_path):
+    """A short --cache-ttl must actually shorten the stored entry's lifetime."""
+    stored_at = {}
+
+    class _Recording(SqliteCache):
+        def set(self, key, value, expires_at):
+            stored_at[key] = expires_at
+            super().set(key, value, expires_at)
+
+    cache = _Recording(str(tmp_path / "c.sqlite"))
+    r = _Counting()
+    r.enrich(_frame(["1.1.1.1"]), "DstIP", 1, cache=cache, cache_ttl=timedelta(hours=6))
+    expires_at = stored_at[r._cache_key("1.1.1.1")]
+    assert abs((expires_at - (_NOW + timedelta(hours=6))).total_seconds()) < 30
+
+
+def test_enrich_reports_failed_share(tmp_path, capsys):
+    """After the progress bar: how many of the resolved keys came back empty
+    (exactly the ones not stored in the cache, retried on the next run)."""
+
+    class _HalfEmpty(Resolver):
+        name = "half_empty"
+
+        def resolve_one(self, key):
+            r = self._empty_result()
+            if key.startswith("1."):
+                r["country"] = "RU"
+            return r
+
+    cache = SqliteCache(str(tmp_path / "c.sqlite"))
+    r = _HalfEmpty()
+    r.enrich(_frame(["1.1.1.1", "2.2.2.2", "3.3.3.3", "4.4.4.4"]), "DstIP", 2, cache=cache)
+    err = capsys.readouterr().err
+    assert "Resolved: 1 of 4" in err
+    assert "failed: 3 (75.0%)" in err
+
+
+def test_enrich_no_stats_line_when_all_cached(tmp_path, capsys):
+    cache = SqliteCache(str(tmp_path / "c.sqlite"))
+    _Counting().enrich(_frame(["1.1.1.1"]), "DstIP", 1, cache=cache)
+    capsys.readouterr()
+    _Counting().enrich(_frame(["1.1.1.1"]), "DstIP", 1, cache=cache)  # full cache hit
+    assert "Resolved:" not in capsys.readouterr().err

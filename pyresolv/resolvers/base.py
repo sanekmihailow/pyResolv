@@ -11,6 +11,7 @@ from __future__ import annotations
 import abc
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import timedelta
 from typing import Dict, List, Optional, Type
 
 import pandas as pd
@@ -79,6 +80,7 @@ class Resolver(abc.ABC):
         max_workers: int,
         skip_already_enriched: bool = True,
         cache: Optional[Cache] = None,
+        cache_ttl: Optional[timedelta] = None,
     ) -> pd.DataFrame:
         """Enrich an in-memory DataFrame in place (adds/fills RESOLVE_COLUMNS)
         and return it. This is the shared core used both by the path-based
@@ -142,6 +144,7 @@ class Resolver(abc.ABC):
             )
 
             if misses:
+                failed = 0
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     future_to_key = {executor.submit(self.resolve_one, k): k for k in misses}
 
@@ -163,13 +166,30 @@ class Resolver(abc.ABC):
                         results[key] = result
                         # Cache only non-empty results (a transient failure must
                         # not poison the cache). Expiry from the resolver's
-                        # `expires` hint, else the 1st of next month.
+                        # `expires` hint, else `cache_ttl` / the 1st of next month.
                         if any(result.get(col) for col in RESOLVE_COLUMNS):
                             cache.set(
                                 self._cache_key(key),
                                 {col: result.get(col, "") for col in RESOLVE_COLUMNS},
-                                compute_cache_expiry(result.get("expires")),
+                                compute_cache_expiry(result.get("expires"), cache_ttl),
                             )
+                        else:
+                            failed += 1
+
+                # Post-run stats: how many of the keys actually sent to the
+                # resolver came back empty. These are exactly the ones NOT stored
+                # in the cache, so the next run retries them.
+                print(
+                    _("Resolved: %(ok)d of %(n)d, failed: %(failed)d (%(pct).1f%%) "
+                      "— empty results are not cached and will be retried")
+                    % {
+                        "ok": len(misses) - failed,
+                        "n": len(misses),
+                        "failed": failed,
+                        "pct": failed * 100.0 / len(misses),
+                    },
+                    file=sys.stderr,
+                )
 
             mask = normalized_key_series.isin(results.keys())
             if already_enriched_mask is not None:
@@ -188,11 +208,14 @@ class Resolver(abc.ABC):
         max_workers: int,
         skip_already_enriched: bool = True,
         cache: Optional[Cache] = None,
+        cache_ttl: Optional[timedelta] = None,
     ) -> int:
         with open_input(input_path) as in_f:
             df = pd.read_csv(in_f, **PANDAS_READ_KWARGS)
 
-        df = self.enrich(df, key_column, max_workers, skip_already_enriched, cache=cache)
+        df = self.enrich(
+            df, key_column, max_workers, skip_already_enriched, cache=cache, cache_ttl=cache_ttl
+        )
 
         with open_output(output_path) as out_f:
             df.to_csv(out_f, index=False)

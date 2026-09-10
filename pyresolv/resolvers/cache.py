@@ -11,8 +11,10 @@ Backends (selected by RESOLVE__CACHE):
 Expiry rule (see compute_cache_expiry): the resolver may surface an ``expires``
 date (domain paid-till, RDAP ``expiration`` event); the cache entry then lives
 until that date + 1 day. With no usable date the entry lives until the 1st of
-next month. Empty/failed results are never cached (handled in base.enrich), so a
-transient outage does not poison the cache.
+next month. An explicit TTL (RESOLVE__CACHE_TTL / --cache-ttl) replaces that
+"1st of next month" fallback and caps the ``expires`` hint, so an entry never
+outlives the requested TTL. Empty/failed results are never cached (handled in
+base.enrich), so a transient outage does not poison the cache.
 
 Backend errors are non-fatal: get/set swallow and log, behaving as a miss / a
 no-store, so a broken cache never breaks a resolve run.
@@ -61,16 +63,21 @@ def _parse_date(value) -> Optional[datetime]:
     return None
 
 
-def compute_cache_expiry(expires) -> datetime:
+def compute_cache_expiry(expires, ttl: Optional[timedelta] = None) -> datetime:
     """Cache-entry expiry: the resolved `expires` date + 1 day when usable
-    (future and within the TTL cap), otherwise the 1st of next month (UTC)."""
+    (future and within the TTL cap), otherwise the 1st of next month (UTC).
+
+    An explicit `ttl` (RESOLVE__CACHE_TTL / --cache-ttl) replaces the
+    "1st of next month" fallback and caps the `expires` hint — the entry then
+    lives exactly `ttl`, unless the registry says the data expires sooner."""
     now = datetime.now(timezone.utc)
+    ttl_at = now + min(ttl, _MAX_TTL) if ttl is not None else None
     parsed = _parse_date(expires)
     if parsed is not None:
         candidate = parsed + timedelta(days=1)
         if now < candidate <= now + _MAX_TTL:
-            return candidate
-    return _first_of_next_month(now)
+            return min(candidate, ttl_at) if ttl_at is not None else candidate
+    return ttl_at if ttl_at is not None else _first_of_next_month(now)
 
 
 class Cache(abc.ABC):

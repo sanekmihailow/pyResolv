@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-09-08
+
+### Added
+- Configurable resolve-cache lifetime: `RESOLVE__CACHE_TTL` in `.env`, the `--cache-ttl TTL` flag (both the
+  classic `--type resolve` interface and `run`, where it also overrides the YAML), and the YAML step param
+  `cache_ttl`. Precedence **CLI > YAML > ENV**, like every other step param. The spec is a number of seconds
+  (`3600`) or a number with a unit — `s`/`m`/`h`/`d`/`w` (`45m`, `12h`, `30d`, `2w`). Semantics: an explicit
+  TTL **replaces** the built-in "1st of next month" fallback and **caps** the resolver's own expiry hint
+  (`min(expires + 1 day, now + TTL)`), so an entry never outlives the requested TTL, while registry data that
+  expires sooner still wins. Unset -> the previous behavior, unchanged. A malformed value fails fast: at
+  `Settings()` construction for the env var, at argparse time for the flag.
+- Resolve stats after the progress bar (any resolver, both engines): `Resolved: N of M, failed: K (P%) —
+  empty results are not cached and will be retried`. K counts the keys that came back empty — exactly the
+  ones **not** written to the cache, so a run's failure share is visible without digging through the
+  per-key error lines. Printed to stderr (so it lands in `--log-file`), and only when the run actually
+  resolved something (a fully cache-served run has nothing to report).
+- `geo_maxmind` now says once per run why it is doing nothing when `RESOLVE__MMDB_PATH` is unset
+  (`geo_maxmind disabled: RESOLVE__MMDB_PATH is not set, …`). Previously that tier was silently a no-op —
+  with `--resolver geo_maxmind` the only visible trace was a 100%-failed resolve stat, and inside the
+  `default` chain the missing GEO tier was invisible. A set-but-broken path already logged.
+
 ## [2.10.0] - 2026-08-10
 
 ### Added

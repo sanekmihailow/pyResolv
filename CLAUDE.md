@@ -92,7 +92,7 @@ header — while stdout (the CSV) is untouched. Meant for cron; the terminal sti
   per-step pydantic models (`extra="forbid"`), so a typo'd param fails fast before anything runs. `cli.main()`
   routes `argv[0] == "run"` to `runner.run_pipeline`; everything else is the classic `--type` parser, unchanged.
   The `run` parser also accepts the stage flags (`--out-dir`, `--start`, `--min-count`, `--resolver`,
-  `--cache`, …, all `default=None`); `main()` forwards the provided ones as an `overrides` dict, and
+  `--cache`, `--cache-ttl`, …, all `default=None`); `main()` forwards the provided ones as an `overrides` dict, and
   `run_pipeline` merges them onto each step's YAML params for fields that step's model actually has
   (`--start` → collect & aggregate, `--out-dir` → aggregate) — precedence **CLI > YAML > ENV/config**.
   Needs `PyYAML`.
@@ -171,10 +171,20 @@ raising (a failed stage keeps its input); never deletes stdin (`-`/no path) or a
    misses are resolved then stored. Key is namespaced `resolver_name:RESOLVE_SCHEMA_VERSION:key`; the entry's
    TTL comes from `compute_cache_expiry` — the resolver's optional `expires` hint (RDAP `expiration` event /
    tcinet `paid-till`, returned by `resolve_one` as a meta key, never written to the CSV) **+1 day**, else the
-   1st of next month; **empty/failed results are not cached** (so a transient outage can't poison it). Backend
+   1st of next month; **empty/failed results are not cached** (so a transient outage can't poison it). An
+   explicit TTL — `RESOLVE__CACHE_TTL` (`.env`), `--cache-ttl` (both parsers), YAML `cache_ttl` — **replaces
+   the "1st of next month" fallback and caps the `expires` hint** (`min(expires+1d, now+ttl)`), so an entry
+   never outlives the requested TTL; the spec is seconds or a unit suffix `s/m/h/d/w` (`45m`, `12h`, `30d`,
+   `2w`), parsed by `config.parse_ttl` — which lives in `config.py`, not `resolvers/cache.py`, because
+   importing `pyresolv.resolvers` from config would be circular (the resolvers import config). A typo fails
+   fast: at `Settings()` construction for the env var, at argparse time for the flag. `_MAX_TTL` (366 days)
+   still caps everything. Backend
    from `RESOLVE__CACHE` (`default` = SQLite file `RESOLVE__CACHE_PATH`; `redis` = shared, native `EXPIREAT`,
    optional `.[redis]` extra; `none`); the `--cache/--no-cache` flag (YAML `cache: true/false`) toggles it per
-   run, backend errors are non-fatal (log + behave as miss/no-store). The default thread count is the resolver-agnostic `RESOLVE__WORKERS`
+   run, backend errors are non-fatal (log + behave as miss/no-store). After the tqdm bar `enrich` prints a
+   one-line stat — `Resolved: N of M, failed: K (P%)` — where K is the number of keys that came back
+   empty, i.e. exactly the ones **not** stored in the cache (they are retried next run); it is skipped
+   when every key was served from cache. The default thread count is the resolver-agnostic `RESOLVE__WORKERS`
    (`settings.resolve.workers`, default 3), applied in both `pipeline.run_resolve` and `runner._run_resolve`;
    `--workers`/YAML `workers` overrides it. `--resolver` picks by name
    (`resolvers.RESOLVERS` registry); default from `settings.default_resolver`, then `"default"`. Resolvers:
@@ -187,7 +197,9 @@ raising (a failed stage keeps its input); never deletes stdin (`-`/no path) or a
    port-43 whois → **tcinet** (`RESOLVE__TCINET`, `whois.tcinet.ru:43`, domain whois for .ru/.su/.рф — keyed by
    `url_domain`, no-op for an IP key, punycode for IDN). Via the `default` chain (rdap before whois) these tiers
    form one linear cascade. **`geo_maxmind`** reads
-   country from a local MaxMind `.mmdb` via `geoip2` (optional extra — no path/lib → yields nothing);
+   country from a local MaxMind `.mmdb` via `geoip2` (optional extra — no path/lib → yields nothing, but
+   logs one stderr line saying `RESOLVE__MMDB_PATH` is unset, so a silent no-op tier isn't mistaken for a
+   failed lookup);
    **`gunter`** still calls the external HTTP service. Providers return a full `_empty_result()`-padded dict
    (so partial fills are safe with `base.enrich`), never raise (log + return partial), and read timeouts/mmdb
    path from `settings.resolve` (`RESOLVE__*`). Contact extraction (RDAP `objects` is a dict keyed by handle)

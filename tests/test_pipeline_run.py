@@ -66,13 +66,15 @@ class _RecWorkersResolver(Resolver):
     """Records the max_workers it was handed by the worker-count wiring."""
     name = "rec_workers"
     last_workers = None
+    last_cache_ttl = None
 
     def resolve_one(self, key):
         return self._empty_result()
 
-    def enrich(self, df, key_column, max_workers, skip_already_enriched=True, cache=None):
+    def enrich(self, df, key_column, max_workers, skip_already_enriched=True, cache=None, cache_ttl=None):
         type(self).last_workers = max_workers
         type(self).last_cache = type(cache).__name__
+        type(self).last_cache_ttl = cache_ttl
         return df
 
 
@@ -84,7 +86,7 @@ class _BoomResolver(Resolver):
     def resolve_one(self, key):
         return self._empty_result()
 
-    def enrich(self, df, key_column, max_workers, skip_already_enriched=True, cache=None):
+    def enrich(self, df, key_column, max_workers, skip_already_enriched=True, cache=None, cache_ttl=None):
         raise RuntimeError("boom")
 
 
@@ -167,14 +169,14 @@ def test_resolve_enriches(tmp_path, raw_csv):
 def test_runner_resolve_default_workers_from_resolve_settings():
     # No `workers` param -> default comes from settings.resolve.workers, for any resolver.
     _RecWorkersResolver.last_workers = None
-    s = SimpleNamespace(default_resolver="rec_workers", resolve=SimpleNamespace(workers=5))
+    s = SimpleNamespace(default_resolver="rec_workers", resolve=SimpleNamespace(workers=5, cache_ttl=None))
     _run_resolve(pd.DataFrame({"DstIP": ["8.8.8.8"]}), ResolveParams(resolver="rec_workers", cache=False), s)
     assert _RecWorkersResolver.last_workers == 5
 
 
 def test_runner_resolve_workers_param_overrides():
     _RecWorkersResolver.last_workers = None
-    s = SimpleNamespace(default_resolver="rec_workers", resolve=SimpleNamespace(workers=5))
+    s = SimpleNamespace(default_resolver="rec_workers", resolve=SimpleNamespace(workers=5, cache_ttl=None))
     _run_resolve(pd.DataFrame({"DstIP": ["8.8.8.8"]}),
                  ResolveParams(resolver="rec_workers", workers=9, cache=False), s)
     assert _RecWorkersResolver.last_workers == 9
@@ -184,12 +186,13 @@ def test_pipeline_resolve_default_workers_from_resolve_settings(monkeypatch, tmp
     _RecWorkersResolver.last_workers = None
     monkeypatch.setattr(
         pipeline, "get_settings",
-        lambda: SimpleNamespace(default_resolver="rec_workers", resolve=SimpleNamespace(workers=6)),
+        lambda: SimpleNamespace(default_resolver="rec_workers", resolve=SimpleNamespace(workers=6, cache_ttl=None)),
     )
     inp = tmp_path / "in.csv"
     inp.write_text("DstIP,country,asn,asn_descr,contacts\n8.8.8.8,,,,\n", encoding="utf-8")
     args = SimpleNamespace(resolver=None, workers=None, input=[str(inp)],
-                           output=str(tmp_path / "o.csv"), key_column="DstIP", cache=False)
+                           output=str(tmp_path / "o.csv"), key_column="DstIP", cache=False,
+                           cache_ttl=None)
     pipeline.run_resolve(args)
     assert _RecWorkersResolver.last_workers == 6
 
@@ -230,6 +233,23 @@ def test_override_cache_false_uses_null_cache(tmp_path, raw_csv):
     run_pipeline(cfg, input_path=str(raw_csv), output_path=str(tmp_path / "o.csv"),
                  overrides={"cache": False})
     assert _RecWorkersResolver.last_cache == "NullCache"
+
+
+def test_yaml_cache_ttl_parsed_and_passed(tmp_path, raw_csv):
+    from datetime import timedelta
+    _RecWorkersResolver.last_cache_ttl = None
+    cfg = _write(tmp_path, "- trim\n- aggregate\n- resolve: {resolver: rec_workers, cache_ttl: 12h}\n")
+    run_pipeline(cfg, input_path=str(raw_csv), output_path=str(tmp_path / "o.csv"))
+    assert _RecWorkersResolver.last_cache_ttl == timedelta(hours=12)
+
+
+def test_override_cache_ttl_beats_yaml(tmp_path, raw_csv):
+    from datetime import timedelta
+    _RecWorkersResolver.last_cache_ttl = None
+    cfg = _write(tmp_path, "- trim\n- aggregate\n- resolve: {resolver: rec_workers, cache_ttl: 12h}\n")
+    run_pipeline(cfg, input_path=str(raw_csv), output_path=str(tmp_path / "o.csv"),
+                 overrides={"cache_ttl": timedelta(days=1)})
+    assert _RecWorkersResolver.last_cache_ttl == timedelta(days=1)
 
 
 def test_run_parser_collects_overrides():
@@ -333,7 +353,7 @@ def test_out_dir_then_resolve_enriches_split(tmp_path, raw_csv, monkeypatch, str
     stub = SimpleNamespace(
         min_uniq_count=1, default_resolver="fake_res",
         graylog=SimpleNamespace(src_ip_cidr=["10.0.0.0/24"]),
-        resolve=SimpleNamespace(workers=1, cache="none"),
+        resolve=SimpleNamespace(workers=1, cache="none", cache_ttl=None),
         streaming=SimpleNamespace(temp_log_path=None),
     )
     monkeypatch.setattr("pyresolv.runner.get_settings", lambda: stub)

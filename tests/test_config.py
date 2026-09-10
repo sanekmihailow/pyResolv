@@ -206,3 +206,35 @@ def test_env_flag_parsed_by_both_parsers():
     assert a.env == "/x/.env"
     b = build_run_parser().parse_args(["--config", "p", "--env", "/y/.env"])
     assert b.env == "/y/.env"
+
+
+def test_cache_ttl_parsed_from_env(monkeypatch):
+    from datetime import timedelta
+    _settings_with_env_file(monkeypatch, None)
+    monkeypatch.setenv("RESOLVE__CACHE_TTL", "30d")
+
+    assert Settings().resolve.cache_ttl == timedelta(days=30)
+
+
+def test_cache_ttl_defaults_to_none(monkeypatch):
+    _settings_with_env_file(monkeypatch, None)
+    monkeypatch.delenv("RESOLVE__CACHE_TTL", raising=False)
+
+    assert Settings().resolve.cache_ttl is None
+
+
+def test_cache_ttl_invalid_env_raises(monkeypatch):
+    _settings_with_env_file(monkeypatch, None)
+    monkeypatch.setenv("RESOLVE__CACHE_TTL", "nonsense")
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_cache_ttl_flag_parsed_by_both_parsers():
+    from datetime import timedelta
+    from pyresolv.cli import build_parser, build_run_parser
+    a = build_parser().parse_args(["--type", "resolve", "--cache-ttl", "12h"])
+    assert a.cache_ttl == timedelta(hours=12)
+    b = build_run_parser().parse_args(["--config", "p", "--cache-ttl", "45m"])
+    assert b.cache_ttl == timedelta(minutes=45)

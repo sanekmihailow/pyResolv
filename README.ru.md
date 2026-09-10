@@ -45,8 +45,13 @@ collect  ->  trim  ->  merge  ->  aggregate  ->  resolve
   (персистентный кэш, `--cache` включён по умолчанию): каждый уникальный ключ
   резолвится не чаще одного раза до истечения записи — дата истечения из
   резолва + 1 день, либо 1-е число следующего месяца, если даты нет (пустые/
-  сбойные ответы не кэшируются). Backend — `RESOLVE__CACHE` (`default` SQLite /
-  `redis` / `none`); `--no-cache` выключает.
+  сбойные ответы не кэшируются). Явный TTL (`RESOLVE__CACHE_TTL` /
+  `--cache-ttl 30d`) заменяет этот запасной вариант и ограничивает сверху дату
+  истечения от резолвера. Backend — `RESOLVE__CACHE` (`default` SQLite /
+  `redis` / `none`); `--no-cache` выключает. По завершении печатается строка
+  статистики: сколько ключей вернулись пустыми — `Резолвинг завершён: 118 из
+  130, неудачных: 12 (9.2%)` — это ровно те, что не попали в кэш и будут
+  повторены на следующем прогоне.
 
 Источники и резолверы — плагины, регистрируемые по имени
 (`pyresolv/sources/`, `pyresolv/resolvers/`); чтобы добавить новый источник
@@ -173,6 +178,7 @@ gunter). `trim`/`merge`/`aggregate` работают вовсе без `.env`.
 | `RESOLVE__CACHE_PATH` | `~/.cache/pyresolv/resolve-cache.sqlite` | Файл SQLite для backend'а `default` |
 | `RESOLVE__REDIS_URL` | `redis://localhost:6379/0` | URL Redis для backend'а `redis` |
 | `RESOLVE__REDIS_PREFIX` | `pyresolv:resolve:` | Префикс ключей для backend'а `redis` |
+| `RESOLVE__CACHE_TTL` | *(не задано)* | Время жизни записи кэша: секунды или число с единицей `s/m/h/d/w` (`45m`, `12h`, `30d`, `2w`). Не задано -> встроенное правило (дата истечения + 1 день, иначе 1-е число следующего месяца). Если задано — заменяет этот запасной вариант и ограничивает дату истечения. Переопределяется `--cache-ttl` |
 
 ## Запуск
 
@@ -233,6 +239,7 @@ pyresolv --type aggregate --streaming --chunk-size 500000 -i trimmed.csv -o aggr
 | `--key-column COL` | `DstIP` | Колонка с IP для резолвинга |
 | `--workers N` | `RESOLVE__WORKERS` / `3` | Число потоков резолвинга |
 | `--cache` / `--no-cache` | `--cache` | Использовать персистентный кэш резолва (backend из `RESOLVE__CACHE`); `--no-cache` выключает его для прогона |
+| `--cache-ttl TTL` | `RESOLVE__CACHE_TTL` / *(встроенное правило)* | Время жизни записи кэша: `45m`, `12h`, `30d`, `2w` или просто секунды. Заменяет запасной вариант «1-е число следующего месяца» и ограничивает дату истечения от резолвера |
 
 **`run`** (Вариант B, см. ниже)
 
@@ -241,7 +248,7 @@ pyresolv --type aggregate --streaming --chunk-size 500000 -i trimmed.csv -o aggr
 | `--config, -c PATH` | — *(обязательно)* | YAML-конфиг пайплайна |
 | `-i, --input PATH` | stdin | Начальный вход для первого шага |
 | `-o, --output PATH` | stdout | Итоговый вывод |
-| оверрайды шагов | *(из YAML)* | `--source --start --end --time-unit --min-count --out-dir --resolver --key-column --workers --cache/--no-cache` |
+| оверрайды шагов | *(из YAML)* | `--source --start --end --time-unit --min-count --out-dir --resolver --key-column --workers --cache/--no-cache --cache-ttl` |
 
 > **Оверрайды:** параметры стадий обычно живут в YAML, но любой из флагов выше
 > можно передать и в `run`, чтобы **переопределить** YAML для каждого шага, у
@@ -279,7 +286,7 @@ pyresolv run --config pipeline.yaml -o out.csv
 | `trim` | *(нет)* |
 | `merge` | `inputs` (список путей к CSV) |
 | `aggregate` | `min_count`, `out_dir`, `start`, `end`, `time_unit` |
-| `resolve` | `resolver`, `key_column`, `workers` |
+| `resolve` | `resolver`, `key_column`, `workers`, `cache`, `cache_ttl` |
 
 Например, `aggregate --out-dir DIR` из Варианта A здесь превращается в
 `- aggregate: {out_dir: DIR, start: 5, end: 0, time_unit: h}` (нужен заданный
