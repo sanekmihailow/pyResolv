@@ -48,6 +48,10 @@ collect  ->  trim  ->  merge  ->  aggregate  ->  resolve
   `redis` / `none`); `--no-cache` disables it. When the run finishes, a stat line
   reports how many keys came back empty — `Resolved: 118 of 130, failed: 12
   (9.2%)` — i.e. exactly the ones not cached and retried on the next run.
+  **Interrupting is safe:** Ctrl+C (or SIGTERM from cron) writes everything resolved
+  so far to `-o`, prints the command that continues the run and exits 130; feeding
+  that file back in resolves only what is missing. `--delete` never fires on an
+  interrupted stage, so the input survives.
 
 Sources and resolvers are plugins, registered by name
 (`pyresolv/sources/`, `pyresolv/resolvers/`); to add a new source

@@ -10,6 +10,7 @@ Stages are independent Unix filters connected by shell pipes, e.g.:
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
 
 from pydantic import ValidationError
@@ -20,6 +21,7 @@ from pyresolv.config import ConfigError, parse_ttl, set_env_file
 from pyresolv.i18n import _
 from pyresolv.logfile import tee_stderr
 from pyresolv.pipeline import dispatch
+from pyresolv.resolvers.base import ResolveInterrupted
 from pyresolv.runner import run_pipeline
 from pyresolv.schema import DEFAULT_AGGREGATE_CHUNKSIZE, DEFAULT_KEY_COLUMN
 
@@ -31,6 +33,24 @@ _RUN_OVERRIDE_KEYS = (
     "source", "start", "end", "time_unit", "min_count",
     "out_dir", "resolver", "key_column", "workers", "cache", "cache_ttl",
 )
+
+
+def _raise_keyboard_interrupt(signum, frame) -> None:
+    """Route SIGTERM (what cron/systemd send) through the same path as Ctrl+C, so a
+    killed run still writes out everything it has already resolved."""
+    raise KeyboardInterrupt
+
+
+def _resume_hint(exc: ResolveInterrupted, output) -> str | None:
+    """The exact command that continues an interrupted resolve. The partial output
+    already holds every row resolved so far and those rows are skipped on re-run
+    (_is_already_enriched), so the same file is both the input and the output."""
+    if output in (None, "-"):
+        return None
+    return (
+        f"pyresolv --type resolve -i {output} -o {output} "
+        f"--resolver {exc.resolver} --key-column {exc.key_column}"
+    )
 
 
 def _ttl_arg(value: str):
@@ -340,6 +360,7 @@ def main() -> None:
     argv = sys.argv[1:]
     # Language selection before building the parser: --lang -> environment -> English.
     i18n.setup(_preparse_lang(argv))
+    signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
 
     # `run` subcommand (Variant B) is routed separately, so the classic
     # `--type`-based interface (Variant A) stays exactly as before.
@@ -350,18 +371,33 @@ def main() -> None:
             _run_guarded(lambda: (
                 set_env_file(args.env),
                 run_pipeline(args.config, args.input, args.output, overrides, streaming=args.streaming),
-            ))
+            ), args)
         return
 
     parser = build_parser()
     args = parser.parse_args(argv)
     with tee_stderr(args.log_file):
-        _run_guarded(lambda: (set_env_file(args.env), dispatch(args)))
+        _run_guarded(lambda: (set_env_file(args.env), dispatch(args)), args)
 
 
-def _run_guarded(action) -> None:
+def _run_guarded(action, args=None) -> None:
     try:
         action()
+    except ResolveInterrupted as e:
+        # The partial result is already written (Resolver.resolve / the run engines);
+        # tell the user how to pick it up and exit 130, so cron sees a failed run.
+        hint = _resume_hint(e, getattr(args, "output", None))
+        if hint:
+            print(_("Continue with:\n  %(cmd)s") % {"cmd": hint}, file=sys.stderr)
+        else:
+            print(
+                _("The partial CSV went to stdout; save it and continue with -i <file>."),
+                file=sys.stderr,
+            )
+        sys.exit(130)
+    except KeyboardInterrupt:
+        print(_("Interrupted; nothing was written."), file=sys.stderr)
+        sys.exit(130)
     except ValidationError as e:
         print(_format_validation_error(e), file=sys.stderr)
         sys.exit(2)

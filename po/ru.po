@@ -513,3 +513,27 @@ msgstr "Резолвинг завершён: %(ok)d из %(n)d, неудачны
 #: pyresolv/resolvers/geo_maxmind.py
 msgid "geo_maxmind disabled: RESOLVE__MMDB_PATH is not set, no country from a local MaxMind DB"
 msgstr "geo_maxmind отключён: не задан RESOLVE__MMDB_PATH, страна из локальной базы MaxMind не определяется"
+
+#: pyresolv/resolvers/base.py
+msgid "Resolve interrupted: %(done)d of %(n)d keys done"
+msgstr "Резолвинг прерван: сделано %(done)d из %(n)d ключей"
+
+#: pyresolv/resolvers/base.py
+msgid "Interrupted: %(done)d of %(n)d keys resolved. The partial result is kept; already-filled rows are skipped on the next run."
+msgstr "Прервано: зарезолвено %(done)d из %(n)d ключей. Частичный результат сохранён; при следующем запуске заполненные строки пропускаются."
+
+#: pyresolv/cli.py
+msgid ""
+"Continue with:\n"
+"  %(cmd)s"
+msgstr ""
+"Продолжить:\n"
+"  %(cmd)s"
+
+#: pyresolv/cli.py
+msgid "The partial CSV went to stdout; save it and continue with -i <file>."
+msgstr "Частичный CSV ушёл в stdout; сохраните его и продолжите через -i <файл>."
+
+#: pyresolv/cli.py
+msgid "Interrupted; nothing was written."
+msgstr "Прервано; ничего не записано."

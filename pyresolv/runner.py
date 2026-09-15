@@ -37,7 +37,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 from pyresolv.config import Settings, get_settings, parse_ttl
 from pyresolv.i18n import _
 from pyresolv.io import open_output
-from pyresolv.resolvers.base import get_resolver
+from pyresolv.resolvers.base import ResolveInterrupted, get_resolver
 from pyresolv.resolvers.cache import NullCache, get_cache
 from pyresolv.schema import DEFAULT_AGGREGATE_CHUNKSIZE, DEFAULT_KEY_COLUMN
 from pyresolv.sources.base import get_source
@@ -294,7 +294,14 @@ def _run_in_memory(
         params = _resolve_step_params(name, raw, overrides)
         _runner = STEP_TABLE[name][1]
         print(_("[%(i)d/%(n)d] %(step)s") % {"i": idx, "n": total, "step": name}, file=sys.stderr)
-        frame = _runner(frame, params, settings)
+        try:
+            frame = _runner(frame, params, settings)
+        except ResolveInterrupted as e:
+            # Ctrl+C inside resolve: push the partially enriched frame through the
+            # normal sink (including a pending out_dir split) so the work already
+            # done lands on disk, then let the CLI report it and exit 130.
+            _finalize(e.frame, output_path, split_request, settings)
+            raise
         sr = _split_request(params)
         if sr is not None:
             split_request = sr  # applied to the FINAL frame, after all steps
@@ -352,7 +359,13 @@ def _run_streaming(
                 step_out: Optional[str] = output_path
             else:
                 step_out = os.path.join(tmpdir, f"{idx}_{name}.csv")
-            last_rows = _run_streaming_step(name, params, settings, current_path, step_out)
+            try:
+                last_rows = _run_streaming_step(name, params, settings, current_path, step_out)
+            except ResolveInterrupted as e:
+                # The partial CSV was written to step_out, which may live in the temp
+                # dir this block is about to delete — finalize it while it still exists.
+                _finalize(e.frame, output_path, split_request, settings)
+                raise
             current_path = step_out
 
         if split_request is not None:

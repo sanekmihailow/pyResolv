@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-09-15
+
+### Added
+- `resolve` is now **interruptible without losing work**. Ctrl+C (and SIGTERM, what cron/systemd send)
+  no longer throws the run away: queued lookups are cancelled, everything resolved so far is written to
+  `-o` exactly like a normal finish, and the CLI prints the command that continues the run, then exits
+  **130**. Re-running on that file resolves only what is missing — filled rows are skipped by the existing
+  idempotent check, the rest comes from the cache, which was already written per key as results arrived.
+  Works in all three run paths: `--type resolve`, `run`, and `run --streaming` (there the partial file is
+  finalized before the temp dir is removed). `--delete` is **not** applied to an interrupted stage, so the
+  input survives.
+- Every stage's file output is now written **atomically** (`io.open_output`): data goes to a temp file next
+  to the target and is moved into place with `os.replace` only on a clean exit. A stage that dies mid-write
+  can no longer leave a truncated CSV that looks complete, and the previous file stays intact.
+
 ## [2.11.0] - 2026-09-08
 
 ### Added

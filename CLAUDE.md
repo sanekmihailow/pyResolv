@@ -73,6 +73,10 @@ stay empty strings rather than becoming NaN, (b) literal values like `"NA"`/`"NU
 silently swallowed as missing, and (c) `aggregate --streaming` is guaranteed to produce byte-identical output
 to the non-streaming full-load mode regardless of chunk boundaries (dtype can't drift chunk-to-chunk).
 
+**File output is atomic**: `io.open_output` writes a file path via a temp file in the same directory and
+`os.replace`s it into place only when the block exits cleanly (stdout is untouched). So a stage killed
+mid-write leaves no truncated-but-complete-looking CSV, and the previous file survives.
+
 **Stage stdout is data-only**: every stage prints its status/progress messages to stderr (`print(..., file=sys.stderr)`,
 tqdm already defaults to stderr) — stdout is reserved for the CSV wire format so stages can be piped together.
 This stderr/stdout split is what makes the global **`--log-file PATH`** flag a ~30-line wrapper
@@ -184,7 +188,18 @@ raising (a failed stage keeps its input); never deletes stdin (`-`/no path) or a
    run, backend errors are non-fatal (log + behave as miss/no-store). After the tqdm bar `enrich` prints a
    one-line stat — `Resolved: N of M, failed: K (P%)` — where K is the number of keys that came back
    empty, i.e. exactly the ones **not** stored in the cache (they are retried next run); it is skipped
-   when every key was served from cache. The default thread count is the resolver-agnostic `RESOLVE__WORKERS`
+   when every key was served from cache. **Interruption is non-destructive**: the pool is an explicit
+   `ThreadPoolExecutor` (not a `with` block — its `__exit__` joins with `wait=True` and would hang on Ctrl+C
+   until the slowest in-flight request times out), and a `KeyboardInterrupt` — which arrives from a worker
+   through `future.result()` and slips past the `except Exception` around it, being a `BaseException` — is
+   caught around the loop: `shutdown(wait=False, cancel_futures=True)`, the results gathered so far are
+   applied to the frame through the same `_apply_results` helper the normal finish uses, and
+   `ResolveInterrupted` (carrying the frame, counts, resolver name and key column) is raised.
+   `Resolver.resolve` writes that partial frame to `-o`, both `run` engines push it through `_finalize`
+   (in `--streaming` inside the temp-dir block, before it is deleted), `pipeline.dispatch` lets the exception
+   through so `--delete` never fires on an interrupted stage, and `cli._run_guarded` prints the resume
+   command and exits 130. `cli.main` maps SIGTERM to the same path. Resuming needs no new state: the partial
+   CSV plus the per-key cache *is* the checkpoint. The default thread count is the resolver-agnostic `RESOLVE__WORKERS`
    (`settings.resolve.workers`, default 3), applied in both `pipeline.run_resolve` and `runner._run_resolve`;
    `--workers`/YAML `workers` overrides it. `--resolver` picks by name
    (`resolvers.RESOLVERS` registry); default from `settings.default_resolver`, then `"default"`. Resolvers:

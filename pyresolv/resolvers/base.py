@@ -57,6 +57,40 @@ def _is_already_enriched(row: pd.Series) -> bool:
     return all(str(row.get(col, "")).strip() for col in RESOLVE_COLUMNS)
 
 
+class ResolveInterrupted(RuntimeError):
+    """Ctrl+C / SIGTERM stopped the resolve loop. Carries the frame holding
+    everything resolved so far, so the caller still writes a usable CSV; the CLI
+    turns it into exit code 130 plus the command that continues the run."""
+
+    def __init__(self, frame: pd.DataFrame, done: int, total: int, resolver: str, key_column: str) -> None:
+        super().__init__(
+            _("Resolve interrupted: %(done)d of %(n)d keys done") % {"done": done, "n": total}
+        )
+        self.frame = frame
+        self.done = done
+        self.total = total
+        self.resolver = resolver
+        self.key_column = key_column
+
+
+def _apply_results(df: pd.DataFrame, normalized_keys: pd.Series, results: Dict[str, dict],
+                   already_enriched_mask) -> None:
+    """Write the resolved values back into the frame. Shared by the normal finish
+    and the interrupted path, so a partial result lands exactly like a full one."""
+    mask = normalized_keys.isin(results.keys())
+    if already_enriched_mask is not None:
+        mask &= ~already_enriched_mask
+
+    for col in RESOLVE_COLUMNS:
+        df.loc[mask, col] = normalized_keys[mask].map(lambda k: results[k][col])
+
+
+def _write_frame(df: pd.DataFrame, output_path: Optional[str]) -> None:
+    """Write the frame to -o/stdout (open_output makes a file write atomic)."""
+    with open_output(output_path) as out_f:
+        df.to_csv(out_f, index=False)
+
+
 class Resolver(abc.ABC):
     name: str = "base"
 
@@ -145,14 +179,17 @@ class Resolver(abc.ABC):
 
             if misses:
                 failed = 0
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    future_to_key = {executor.submit(self.resolve_one, k): k for k in misses}
-
-                    for future in tqdm(
-                        as_completed(future_to_key),
-                        total=len(future_to_key),
-                        desc=_("Resolving via %(name)s") % {"name": self.name},
-                    ):
+                # Not a `with` block: its __exit__ joins the pool (wait=True), which
+                # on Ctrl+C would hang until the slowest in-flight request times out.
+                executor = ThreadPoolExecutor(max_workers=max_workers)
+                future_to_key = {executor.submit(self.resolve_one, k): k for k in misses}
+                bar = tqdm(
+                    as_completed(future_to_key),
+                    total=len(future_to_key),
+                    desc=_("Resolving via %(name)s") % {"name": self.name},
+                )
+                try:
+                    for future in bar:
                         key = future_to_key[future]
                         try:
                             result = future.result()
@@ -175,6 +212,27 @@ class Resolver(abc.ABC):
                             )
                         else:
                             failed += 1
+                except KeyboardInterrupt:
+                    # Ctrl+C / SIGTERM: keep what is already resolved instead of
+                    # throwing the whole run away. Queued tasks are cancelled and the
+                    # in-flight ones (at most max_workers) abandoned — their keys are
+                    # simply resolved again next run, most of the rest coming from
+                    # the cache, which was written per key as results arrived.
+                    bar.close()
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    _apply_results(df, normalized_key_series, results, already_enriched_mask)
+                    print(
+                        _("Interrupted: %(done)d of %(n)d keys resolved. The partial result "
+                          "is kept; already-filled rows are skipped on the next run.")
+                        % {"done": len(results), "n": len(keys_to_enrich)},
+                        file=sys.stderr,
+                    )
+                    raise ResolveInterrupted(
+                        df, len(results), len(keys_to_enrich), self.name, key_column
+                    ) from None
+                finally:
+                    bar.close()
+                    executor.shutdown(wait=False)
 
                 # Post-run stats: how many of the keys actually sent to the
                 # resolver came back empty. These are exactly the ones NOT stored
@@ -191,12 +249,7 @@ class Resolver(abc.ABC):
                     file=sys.stderr,
                 )
 
-            mask = normalized_key_series.isin(results.keys())
-            if already_enriched_mask is not None:
-                mask &= ~already_enriched_mask
-
-            for col in RESOLVE_COLUMNS:
-                df.loc[mask, col] = normalized_key_series[mask].map(lambda k: results[k][col])
+            _apply_results(df, normalized_key_series, results, already_enriched_mask)
 
         return df
 
@@ -213,11 +266,15 @@ class Resolver(abc.ABC):
         with open_input(input_path) as in_f:
             df = pd.read_csv(in_f, **PANDAS_READ_KWARGS)
 
-        df = self.enrich(
-            df, key_column, max_workers, skip_already_enriched, cache=cache, cache_ttl=cache_ttl
-        )
+        try:
+            df = self.enrich(
+                df, key_column, max_workers, skip_already_enriched, cache=cache, cache_ttl=cache_ttl
+            )
+        except ResolveInterrupted as e:
+            # Same sink as a normal finish, so the partial CSV can be fed straight
+            # back in to continue; the CLI reports it and exits 130.
+            _write_frame(e.frame, output_path)
+            raise
 
-        with open_output(output_path) as out_f:
-            df.to_csv(out_f, index=False)
-
+        _write_frame(df, output_path)
         return len(df)
