@@ -535,5 +535,5 @@ msgid "The partial CSV went to stdout; save it and continue with -i <file>."
 msgstr "Частичный CSV ушёл в stdout; сохраните его и продолжите через -i <файл>."
 
 #: pyresolv/cli.py
-msgid "Interrupted; nothing was written."
-msgstr "Прервано; ничего не записано."
+msgid "Interrupted; the run did not finish."
+msgstr "Прервано; прогон не завершён."

@@ -41,16 +41,21 @@ def _raise_keyboard_interrupt(signum, frame) -> None:
     raise KeyboardInterrupt
 
 
-def _resume_hint(exc: ResolveInterrupted, output) -> str | None:
-    """The exact command that continues an interrupted resolve. The partial output
-    already holds every row resolved so far and those rows are skipped on re-run
-    (_is_already_enriched), so the same file is both the input and the output."""
-    if output in (None, "-"):
+def _resume_hint(exc: ResolveInterrupted) -> str | None:
+    """The exact command that continues an interrupted resolve, built from where the
+    partial result was actually written (never from -o, which an out_dir split
+    ignores). Those rows are skipped on re-run (_is_already_enriched), so the same
+    file is both the input and the output."""
+    tail = f"--resolver {exc.resolver} --key-column {exc.key_column}"
+    if exc.out_dir:
+        # A per-subnet split wrote one file per CIDR — continue each of them.
+        return (
+            f'for f in {exc.out_dir}/*.csv; do '
+            f'pyresolv --type resolve -i "$f" -o "$f" {tail}; done'
+        )
+    if exc.output_path in (None, "-"):
         return None
-    return (
-        f"pyresolv --type resolve -i {output} -o {output} "
-        f"--resolver {exc.resolver} --key-column {exc.key_column}"
-    )
+    return f"pyresolv --type resolve -i {exc.output_path} -o {exc.output_path} {tail}"
 
 
 def _ttl_arg(value: str):
@@ -371,22 +376,22 @@ def main() -> None:
             _run_guarded(lambda: (
                 set_env_file(args.env),
                 run_pipeline(args.config, args.input, args.output, overrides, streaming=args.streaming),
-            ), args)
+            ))
         return
 
     parser = build_parser()
     args = parser.parse_args(argv)
     with tee_stderr(args.log_file):
-        _run_guarded(lambda: (set_env_file(args.env), dispatch(args)), args)
+        _run_guarded(lambda: (set_env_file(args.env), dispatch(args)))
 
 
-def _run_guarded(action, args=None) -> None:
+def _run_guarded(action) -> None:
     try:
         action()
     except ResolveInterrupted as e:
         # The partial result is already written (Resolver.resolve / the run engines);
         # tell the user how to pick it up and exit 130, so cron sees a failed run.
-        hint = _resume_hint(e, getattr(args, "output", None))
+        hint = _resume_hint(e)
         if hint:
             print(_("Continue with:\n  %(cmd)s") % {"cmd": hint}, file=sys.stderr)
         else:
@@ -396,7 +401,7 @@ def _run_guarded(action, args=None) -> None:
             )
         sys.exit(130)
     except KeyboardInterrupt:
-        print(_("Interrupted; nothing was written."), file=sys.stderr)
+        print(_("Interrupted; the run did not finish."), file=sys.stderr)
         sys.exit(130)
     except ValidationError as e:
         print(_format_validation_error(e), file=sys.stderr)

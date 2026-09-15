@@ -198,8 +198,10 @@ raising (a failed stage keeps its input); never deletes stdin (`-`/no path) or a
    `Resolver.resolve` writes that partial frame to `-o`, both `run` engines push it through `_finalize`
    (in `--streaming` inside the temp-dir block, before it is deleted), `pipeline.dispatch` lets the exception
    through so `--delete` never fires on an interrupted stage, and `cli._run_guarded` prints the resume
-   command and exits 130. `cli.main` maps SIGTERM to the same path. Resuming needs no new state: the partial
-   CSV plus the per-key cache *is* the checkpoint. The default thread count is the resolver-agnostic `RESOLVE__WORKERS`
+   command and exits 130 — built from `ResolveInterrupted.output_path`/`.out_dir`, which the writer fills in,
+   NOT from `-o` (an `out_dir` split ignores `-o`, so the hint would name a file that was never created; with
+   a split it walks `<out_dir>/*.csv` instead). `cli.main` maps SIGTERM to the same path. Resuming needs no
+   new state: the partial CSV plus the per-key cache *is* the checkpoint. The default thread count is the resolver-agnostic `RESOLVE__WORKERS`
    (`settings.resolve.workers`, default 3), applied in both `pipeline.run_resolve` and `runner._run_resolve`;
    `--workers`/YAML `workers` overrides it. `--resolver` picks by name
    (`resolvers.RESOLVERS` registry); default from `settings.default_resolver`, then `"default"`. Resolvers:

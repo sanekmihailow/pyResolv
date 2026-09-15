@@ -276,6 +276,17 @@ def _finalize(
             frame.to_csv(out_f, index=False)
 
 
+def _mark_partial_output(exc: ResolveInterrupted, output_path: Optional[str],
+                        split_request: Optional[SplitRequest]) -> None:
+    """Tell the interrupt where its partial result went, so the CLI's resume command
+    names real files: the per-subnet directory when a split was requested (then -o is
+    ignored, see _finalize), otherwise the single -o file."""
+    if split_request is not None:
+        exc.out_dir = split_request[0]
+    else:
+        exc.output_path = output_path
+
+
 def _run_in_memory(
     steps: List[Tuple[str, dict]],
     input_path: Optional[str],
@@ -301,6 +312,7 @@ def _run_in_memory(
             # normal sink (including a pending out_dir split) so the work already
             # done lands on disk, then let the CLI report it and exit 130.
             _finalize(e.frame, output_path, split_request, settings)
+            _mark_partial_output(e, output_path, split_request)
             raise
         sr = _split_request(params)
         if sr is not None:
@@ -365,6 +377,7 @@ def _run_streaming(
                 # The partial CSV was written to step_out, which may live in the temp
                 # dir this block is about to delete — finalize it while it still exists.
                 _finalize(e.frame, output_path, split_request, settings)
+                _mark_partial_output(e, output_path, split_request)
                 raise
             current_path = step_out
 

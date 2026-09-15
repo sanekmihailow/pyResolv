@@ -158,3 +158,65 @@ def test_open_output_is_atomic(tmp_path):
         f.write("new\n")
     assert target.read_text(encoding="utf-8") == "new\n"
     assert list(tmp_path.glob(".*tmp")) == []
+
+
+# --- resume hint points at what was actually written ------------------------
+
+def _hint(out_dir=None, output_path=None):
+    from pyresolv.cli import _resume_hint
+    exc = ResolveInterrupted(_frame(), 1, 2, "rdap", "DstIP")
+    exc.out_dir, exc.output_path = out_dir, output_path
+    return _resume_hint(exc)
+
+
+def test_resume_hint_for_a_single_file():
+    assert _hint(output_path="out.csv") == (
+        "pyresolv --type resolve -i out.csv -o out.csv --resolver rdap --key-column DstIP"
+    )
+
+
+def test_resume_hint_for_a_per_subnet_split():
+    """With out_dir the -o file is never written, so the hint must walk the split."""
+    hint = _hint(out_dir="/srv/report")
+    assert hint.startswith("for f in /srv/report/*.csv; do")
+    assert '-i "$f" -o "$f"' in hint
+
+
+def test_resume_hint_is_none_for_stdout():
+    assert _hint(output_path=None) is None and _hint(output_path="-") is None
+
+
+def test_run_with_out_dir_reports_the_split_dir(tmp_path, monkeypatch):
+    """The interrupt must carry the split directory, not the ignored -o path."""
+    out_dir = tmp_path / "split"
+    stub = SimpleNamespace(
+        min_uniq_count=1, default_resolver="interrupting",
+        graylog=SimpleNamespace(src_ip_cidr=["10.2.83.0/24"]),
+        resolve=SimpleNamespace(workers=1, cache="none", cache_ttl=None),
+    )
+    monkeypatch.setattr("pyresolv.runner.get_settings", lambda: stub)
+
+    src = tmp_path / "in.csv"
+    pd.DataFrame({
+        "SrcIP": [f"10.2.83.{i}" for i in range(1, 9)],
+        "DstIP": _IPS,
+        "DstPort": ["443"] * 8,
+        "ac_action": ["allow"] * 8,
+        "url_domain": ["x"] * 8,
+        "ac_rule_name": ["r"] * 8,
+    }).to_csv(src, index=False)
+
+    cfg = tmp_path / "pipe.yaml"
+    cfg.write_text(
+        f"- aggregate: {{out_dir: {out_dir}}}\n"
+        "- resolve: {resolver: interrupting, workers: 1, cache: false}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ResolveInterrupted) as exc:
+        run_pipeline(str(cfg), str(src), str(tmp_path / "ignored.csv"))
+
+    assert exc.value.out_dir == str(out_dir)
+    assert exc.value.output_path is None
+    assert list(out_dir.glob("*.csv"))                       # the split was written
+    assert not (tmp_path / "ignored.csv").exists()           # -o really is ignored

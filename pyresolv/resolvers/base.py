@@ -71,6 +71,11 @@ class ResolveInterrupted(RuntimeError):
         self.total = total
         self.resolver = resolver
         self.key_column = key_column
+        # Filled in by whoever writes the partial result — a single CSV, or the
+        # per-subnet directory when an out_dir split was requested. The CLI builds
+        # the resume command from this, so it always names a file that exists.
+        self.output_path: Optional[str] = None
+        self.out_dir: Optional[str] = None
 
 
 def _apply_results(df: pd.DataFrame, normalized_keys: pd.Series, results: Dict[str, dict],
@@ -274,6 +279,7 @@ class Resolver(abc.ABC):
             # Same sink as a normal finish, so the partial CSV can be fed straight
             # back in to continue; the CLI reports it and exits 130.
             _write_frame(e.frame, output_path)
+            e.output_path = output_path
             raise
 
         _write_frame(df, output_path)

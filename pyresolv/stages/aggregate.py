@@ -182,7 +182,10 @@ def write_split_by_subnet(
     written = 0
     for label, group in result.groupby(labels, sort=True):
         fname = slice_filename(prefix, label, base_now, start, end, time_unit)
-        group.to_csv(os.path.join(out_dir, fname), index=False)
+        # open_output, not a bare to_csv: an interrupted split then leaves whole
+        # files for the subnets it got to, never a truncated one.
+        with open_output(os.path.join(out_dir, fname)) as out_f:
+            group.to_csv(out_f, index=False)
         print(
             ngettext(
                 "[%(label)s] wrote %(n)s row -> %(file)s",

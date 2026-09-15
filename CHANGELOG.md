@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.12.1] - 2026-09-15
+
+### Fixed
+- The resume command printed by an interrupted `resolve` named the `-o` file even when the pipeline
+  wrote a per-subnet split (`aggregate: {out_dir: …}`), where `-o` is ignored and never created — so the
+  suggested command pointed at a file that does not exist. `ResolveInterrupted` now carries where the
+  partial result actually landed, and the hint walks the split instead:
+  `for f in <out_dir>/*.csv; do pyresolv --type resolve -i "$f" -o "$f" …; done`. The data itself was
+  never at risk — the split was already written from the partial frame.
+- `write_split_by_subnet` writes each per-subnet CSV through `io.open_output`, so an interrupted split
+  leaves whole files for the subnets it reached instead of a possibly truncated one.
+- The bare-interrupt message no longer claims "nothing was written" (untrue for a split that got
+  partway through); it now just reports that the run did not finish.
+
 ## [2.12.0] - 2026-09-15
 
 ### Added
