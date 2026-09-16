@@ -330,6 +330,82 @@ Both variants use the same stages and produce identical results:
 
 Requires `PyYAML` (included in `requirements.txt`).
 
+## Resuming an interrupted resolve
+
+`resolve` is the long stage, and it is interruptible without losing work. Ctrl+C
+(or SIGTERM, what cron and systemd send) cancels the queued lookups, writes
+everything resolved so far exactly where a finished run would write it, prints
+the command that continues the run, and exits **130**:
+
+```
+Resolving via rdap:  55%|#####5    | 33/60 [00:10<00:08]
+^C
+Interrupted: 33 of 60 keys resolved. The partial result is kept; already-filled rows are skipped on the next run.
+Continue with:
+  pyresolv --type resolve -i out.csv -o out.csv --resolver rdap --key-column DstIP
+```
+
+Run that command and only the missing keys hit the network: filled rows are
+skipped (the idempotency above), the rest comes from the cache, which is written
+per key as results arrive. Interrupting the resumed run is just as safe — repeat
+as often as needed.
+
+**With a per-subnet split** (`aggregate: {out_dir: …}`) the partial result *is*
+the split, so the printed command walks it:
+
+```bash
+for f in /mnt/report/2026-09-16/09-23/*.csv; do
+    pyresolv --type resolve -i "$f" -o "$f" --resolver default --key-column DstIP
+done
+```
+
+Files that are already complete finish instantly ("Nothing to enrich").
+
+**After a power loss** no handler runs, so the partial CSV is never written — but
+the cache survives (committed per key) and so do the finished stage files. With
+`run --streaming` the intermediate CSVs stay behind, since the temp dir cleanup
+never ran; they are named `1_collect.csv`, `2_trim.csv`, `3_aggregate.csv`, …:
+
+```bash
+TMP=$(ls -dt "${STREAMING__TEMP_LOG_PATH:-/tmp}"/pyresolv-* | head -1)
+pyresolv run --config resume.yaml --streaming -i "$TMP/2_trim.csv" \
+    --out-dir /mnt/report/2026-09-16/09-23/ --cache-ttl 90d
+```
+
+`resume.yaml` is the normal pipeline minus the stages that already finished —
+pick it by the newest surviving file:
+
+```yaml
+# pipeline.yaml — the normal run
+- collect: {source: graylog, start: 5, end: 0, time_unit: d}
+- trim
+- aggregate: {start: 5, end: 0, time_unit: d, min_count: 20}
+- resolve: {resolver: default}
+```
+
+```yaml
+# resume.yaml — continue from 2_trim.csv (collect and trim are already done)
+- aggregate: {start: 5, end: 0, time_unit: d, min_count: 20}
+- resolve: {resolver: default}
+```
+
+If only `1_collect.csv` survived, prepend `- trim` to that file. `out_dir` can
+stay out of the YAML — pass `--out-dir` on the command line so the split lands in
+the same report directory as the interrupted run; `start`/`end`/`time_unit` must
+match the original, they form the time slice in the split filenames.
+
+Point `STREAMING__TEMP_LOG_PATH` at real disk: on a tmpfs `/tmp` nothing survives
+a power loss and `collect` has to run again from scratch.
+
+Two things to keep in mind:
+
+- **`--delete` and restartability are mutually exclusive** — it removes exactly
+  the intermediate files a restart would pick up.
+- **Never feed an aggregated CSV into a pipeline that starts with `aggregate`**:
+  re-aggregating a grouped file resets every `count` to 1 and drops the resolve
+  columns, so a `min_count` filter then throws the whole result away. Resume from
+  the trimmed file instead.
+
 ## Deleting intermediate files (--delete/--del)
 
 The `--delete` flag (alias `--del`) is available on any stage: after

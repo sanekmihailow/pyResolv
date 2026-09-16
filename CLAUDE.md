@@ -9,7 +9,10 @@ package, `pyresolv/`, built as a set of composable filter-stages (`collect`, `tr
 `resolve`) that compose via shell pipes — Unix-filter style: one stage = one process, reads stdin/`-i`, writes
 stdout/`-o`. Sources (e.g. `graylog`/OpenSearch) and resolvers (e.g. `gunter`) are name-registered plugins.
 
-There is no git repository (as of this writing), no lint config. Comments and docstrings are in English. All
+The project is a git repository (branch `master`, remote `origin`); there is no lint config. History is one
+commit per release, subject `release X.Y.Z`, body starting with a `feat:`/`fix:`/`docs:` line — keep that shape,
+and bump `pyresolv/__init__.py` + `pyproject.toml` together with a `CHANGELOG.md` entry. Comments and
+docstrings are in English. All
 user-facing strings (CLI help, errors, stderr status) are English `msgid`s in the code, translated to Russian
 via gettext (`po/ru.po`); see the Localization section — match that when editing user-facing strings.
 
@@ -48,7 +51,8 @@ Tests: `./.venv/bin/python -m pytest tests/`.
 pyresolv/
   config.py          pydantic-settings: nested per-integration settings loaded from .env
   schema.py           CANONICAL_COLUMNS / DROP_COLS / GROUP_COLS / sort order / pandas read kwargs — single source
-  io.py                open_input/open_output: path -> file, None/'-' -> stdin/stdout
+  io.py                open_input/open_output: path -> file, None/'-' -> stdin/stdout (file writes are atomic)
+  logfile.py          tee_stderr: the --log-file copy of stderr, timestamped, tqdm \r redraws collapsed
   subnets.py          ipaddress helpers: CIDR parsing, octet-prefix, subnet labels, split filenames
   pipeline.py         --type -> stage dispatcher (Variant A: one stage per process)
   runner.py           single-process pipeline engine + YAML config (Variant B)
@@ -59,7 +63,8 @@ pyresolv/
   stages/
     collect.py, trim.py, merge.py, aggregate.py
   resolvers/
-    base.py             Resolver ABC + RESOLVERS registry; ThreadPool, cache, idempotent skip
+    base.py             Resolver ABC + RESOLVERS registry; ThreadPool, cache, idempotent skip, ResolveInterrupted
+    cache.py            persistent resolve cache: NullCache / SqliteCache / RedisCache + expiry rule
     default_chain.py    `default` resolver: composite chain GEO -> RDAP -> WHOIS
     rdap.py / whois.py   native ASN/contacts/country via ipwhois (RDAP / port-43)
     geo_maxmind.py       country from a local MaxMind .mmdb (optional geoip2)

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.12.2] - 2026-09-16
+
+### Added
+- README (both languages): a "Resuming an interrupted resolve" section with the actual commands —
+  the one the CLI prints for a single output file, the loop for a per-subnet `out_dir` split, and the
+  power-loss case (nothing written, but the cache and the `run --streaming` intermediate CSVs survive,
+  so the run continues from the last finished stage). Includes the two traps: `--delete` removes exactly
+  the files a restart needs, and re-feeding an aggregated CSV into a pipeline that starts with `aggregate`
+  resets every `count` to 1 and drops the resolve columns. Shows the resume pipeline itself: the normal
+  `pipeline.yaml` next to the `resume.yaml` that drops the stages already done, and which one to pick by
+  the newest surviving temp file.
+
 ## [2.12.1] - 2026-09-15
 
 ### Fixed
